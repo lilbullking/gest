@@ -27,6 +27,12 @@ const App: React.FC = () => {
     'worker-documents' | 'invoices' | 'payslips' | 'payroll' | 'remuneration-book' | 'contract-annexes' | 'vacation-control'
   >('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const handleTabChange = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setIsMobileMenuOpen(false);
+  };
 
   const getInitials = () => {
     if (!user) return 'NC';
@@ -59,10 +65,20 @@ const App: React.FC = () => {
       {/* Background Grids */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f030_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f030_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,#1f293704_1px,transparent_1px),linear-gradient(to_bottom,#1f293704_1px,transparent_1px)] bg-[size:42px_42px] pointer-events-none z-0"></div>
 
+      {/* Mobile Sidebar Backdrop overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-slate-950/45 backdrop-blur-sm z-30 md:hidden transition-opacity duration-300 animate-fadeIn"
+        />
+      )}
+
       {/* SIDEBAR CONSOLE (Floating Frosted Island) */}
       <aside 
-        className={`my-4 ml-4 mr-0 rounded-[28px] bg-white/70 border border-white/60 dark:bg-[#0c111f]/60 dark:border-slate-850/50 flex flex-col justify-between transition-all duration-300 z-20 relative shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.015)] backdrop-blur-md ${
+        className={`fixed md:relative left-4 md:left-auto top-4 bottom-4 md:top-auto md:bottom-auto md:my-4 md:ml-4 md:mr-0 h-[calc(100vh-32px)] rounded-[28px] bg-white/70 border border-white/60 dark:bg-[#0c111f]/60 dark:border-slate-850/50 flex flex-col transition-all duration-300 z-40 md:z-20 shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.015)] backdrop-blur-md ${
           sidebarCollapsed ? 'w-20' : 'w-64'
+        } ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-80 md:translate-x-0'
         }`}
       >
         
@@ -87,7 +103,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Navigation Menu */}
-        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto max-h-[calc(100vh-260px)] custom-scrollbar">
+        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto custom-scrollbar">
           
           {/* General Section */}
           <div className="space-y-1">
@@ -97,7 +113,7 @@ const App: React.FC = () => {
               </span>
             )}
             <button
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => handleTabChange('dashboard')}
               className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 activeTab === 'dashboard'
                   ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -109,7 +125,7 @@ const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveTab('documents')}
+              onClick={() => handleTabChange('documents')}
               className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 activeTab === 'documents'
                   ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -132,7 +148,7 @@ const App: React.FC = () => {
             {/* Worker Documents: Admin/HR only */}
             {['admin', 'hr'].includes(user?.role || '') && (
               <button
-                onClick={() => setActiveTab('worker-documents')}
+                onClick={() => handleTabChange('worker-documents')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                   activeTab === 'worker-documents'
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -146,7 +162,7 @@ const App: React.FC = () => {
 
             {/* Vacation Control: All roles (displays differently) */}
             <button
-              onClick={() => setActiveTab('vacation-control')}
+              onClick={() => handleTabChange('vacation-control')}
               className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 activeTab === 'vacation-control'
                   ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -159,7 +175,7 @@ const App: React.FC = () => {
 
             {/* Contract Annexes: All roles */}
             <button
-              onClick={() => setActiveTab('contract-annexes')}
+              onClick={() => handleTabChange('contract-annexes')}
               className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 activeTab === 'contract-annexes'
                   ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -182,7 +198,7 @@ const App: React.FC = () => {
             {/* Payroll (Planilla): Admin/HR only */}
             {['admin', 'hr'].includes(user?.role || '') && (
               <button
-                onClick={() => setActiveTab('payroll')}
+                onClick={() => handleTabChange('payroll')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                   activeTab === 'payroll'
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -197,7 +213,7 @@ const App: React.FC = () => {
             {/* Remuneration Book: Admin/HR only */}
             {['admin', 'hr'].includes(user?.role || '') && (
               <button
-                onClick={() => setActiveTab('remuneration-book')}
+                onClick={() => handleTabChange('remuneration-book')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                   activeTab === 'remuneration-book'
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -211,7 +227,7 @@ const App: React.FC = () => {
 
             {/* Payslips (Liquidaciones): All roles */}
             <button
-              onClick={() => setActiveTab('payslips')}
+              onClick={() => handleTabChange('payslips')}
               className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 activeTab === 'payslips'
                   ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -225,7 +241,7 @@ const App: React.FC = () => {
             {/* Invoices (Facturas): Admin/HR only */}
             {['admin', 'hr'].includes(user?.role || '') && (
               <button
-                onClick={() => setActiveTab('invoices')}
+                onClick={() => handleTabChange('invoices')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                   activeTab === 'invoices'
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -240,7 +256,7 @@ const App: React.FC = () => {
             {/* Admin Settings: Admin/HR/Auditor only */}
             {['admin', 'hr', 'auditor'].includes(user?.role || '') && (
               <button
-                onClick={() => setActiveTab('admin')}
+                onClick={() => handleTabChange('admin')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 ${
                   activeTab === 'admin'
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/20 dark:text-brand-400 border border-brand-100/40 dark:border-brand-900/30 shadow-sm'
@@ -348,11 +364,24 @@ const App: React.FC = () => {
 
         {/* HEADER (Floating Frosted Panel) */}
         <header className="p-4 mx-6 mt-4 flex items-center justify-between rounded-2xl border border-white/60 bg-white/60 dark:bg-[#0c111f]/45 dark:border-slate-850/40 relative z-10 transition-colors backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.01)]">
-          <div className="flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-brand-500" />
-            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-              Empresa activa: <span className="text-slate-800 dark:text-white ml-1 font-semibold">{user?.tenant?.name || 'Ninguno'}</span>
-            </span>
+          <div className="flex items-center gap-3">
+            {/* Hamburger Menu Button (Mobile Only) */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-2 bg-white/90 border border-slate-200 hover:bg-slate-100/50 text-slate-500 hover:text-slate-800 dark:bg-[#0c111f] dark:border-slate-800 dark:text-slate-400 dark:hover:text-slate-100 rounded-xl transition-all cursor-pointer md:hidden hover-scale"
+              title="Abrir Menú"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-brand-500" />
+              <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                Empresa activa: <span className="text-slate-800 dark:text-white ml-1 font-semibold">{user?.tenant?.name || 'Ninguno'}</span>
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
@@ -376,11 +405,82 @@ const App: React.FC = () => {
         </header>
 
         {/* WORKSPACE VIEW CONTAINER */}
-        <div className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto relative z-10">
+        <div className="flex-1 p-6 md:p-8 pb-24 md:pb-8 max-w-7xl w-full mx-auto relative z-10">
           {renderContent()}
         </div>
 
       </main>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/85 dark:bg-[#0c111f]/90 border-t border-slate-200/50 dark:border-slate-850/50 backdrop-blur-md z-30 flex justify-around items-center py-2 px-4 md:hidden shadow-[0_-4px_24px_rgba(0,0,0,0.02)]">
+        
+        {/* Dashboard Button */}
+        <button
+          onClick={() => handleTabChange('dashboard')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+            activeTab === 'dashboard'
+              ? 'text-brand-650 dark:text-brand-400 font-bold'
+              : 'text-slate-400 hover:text-slate-600 dark:text-slate-500'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span className="text-[9px] uppercase tracking-wider font-semibold">Dashboard</span>
+        </button>
+
+        {/* Gestor Documental Button */}
+        <button
+          onClick={() => handleTabChange('documents')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+            activeTab === 'documents'
+              ? 'text-brand-650 dark:text-brand-400 font-bold'
+              : 'text-slate-400 hover:text-slate-600 dark:text-slate-500'
+          }`}
+        >
+          <FileText className="w-5 h-5" />
+          <span className="text-[9px] uppercase tracking-wider font-semibold">Documentos</span>
+        </button>
+
+        {/* Vacation / Calendar Button */}
+        <button
+          onClick={() => handleTabChange('vacation-control')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+            activeTab === 'vacation-control'
+              ? 'text-brand-650 dark:text-brand-400 font-bold'
+              : 'text-slate-400 hover:text-slate-600 dark:text-slate-500'
+          }`}
+        >
+          <Calendar className="w-5 h-5" />
+          <span className="text-[9px] uppercase tracking-wider font-semibold">{user?.role === 'employee' ? 'Vacaciones' : 'Control'}</span>
+        </button>
+
+        {/* Payslips Button */}
+        <button
+          onClick={() => handleTabChange('payslips')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+            activeTab === 'payslips'
+              ? 'text-brand-650 dark:text-brand-400 font-bold'
+              : 'text-slate-400 hover:text-slate-600 dark:text-slate-500'
+          }`}
+        >
+          <Coins className="w-5 h-5" />
+          <span className="text-[9px] uppercase tracking-wider font-semibold">Liquidaciones</span>
+        </button>
+
+        {/* Administration Button (Admin/HR only) */}
+        {['admin', 'hr', 'auditor'].includes(user?.role || '') && (
+          <button
+            onClick={() => handleTabChange('admin')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'admin'
+                ? 'text-brand-650 dark:text-brand-400 font-bold'
+                : 'text-slate-400 hover:text-slate-600 dark:text-slate-500'
+            }`}
+          >
+            <Settings className="w-5 h-5" />
+            <span className="text-[9px] uppercase tracking-wider font-semibold">Panel</span>
+          </button>
+        )}
+      </nav>
     </div>
   );
 };

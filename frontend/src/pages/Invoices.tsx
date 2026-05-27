@@ -125,8 +125,8 @@ const Invoices: React.FC = () => {
 
   const togglePaymentStatus = (id: string) => {
     const current = invoiceStatuses[id] || 'pending';
-    const next = current === 'paid' ? 'pending' : 'paid';
-    const updated = { ...invoiceStatuses, [id]: next };
+    const next: 'paid' | 'pending' = current === 'paid' ? 'pending' : 'paid';
+    const updated: Record<string, 'paid' | 'pending'> = { ...invoiceStatuses, [id]: next };
     setInvoiceStatuses(updated);
     localStorage.setItem('nubcore_invoice_payment_statuses', JSON.stringify(updated));
   };
