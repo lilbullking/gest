@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # 1. Base de Datos MySQL (Requisito del SaaS)
+  db:
+    image: mysql:8.0
+    container_name: nubcore_mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-nubcore_db}
+      MYSQL_USER: ${DB_USER:-nubcore_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-nubcore_pass}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - nubcore_network
+
+  # 2. Backend Django REST Framework
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nubcore_backend
+    restart: always
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_DEBUG=True
+      - DJANGO_SECRET_KEY=local-django-dev-secret-key-998877
+      - DB_NAME=${DB_NAME:-nubcore_db}
+      - DB_USER=${DB_USER:-nubcore_user}
+      - DB_PASSWORD=${DB_PASSWORD:-nubcore_pass}
+      - DB_HOST=db
+      - DB_PORT=3306
+    depends_on:
+      - db
+    networks:
+      - nubcore_network
+
+  # 3. Frontend React + Vite SPA
+  frontend:
+    image: node:18-alpine
+    container_name: nubcore_frontend
+    restart: always
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    command: npm run dev -- --host
+    depends_on:
+      - backend
+    networks:
+      - nubcore_network
+
+volumes:
+  mysql_data:
+
+networks:
+  nubcore_network:
+    driver: bridge

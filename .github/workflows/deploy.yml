@@ -1,0 +1,86 @@
+name: CI/CD Pipeline - Nubcore
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # 1. Pruebas y Validación del Backend
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        
+    - name: Run Backend Linter (Flake8)
+      run: |
+        pip install flake8
+        # detiene la ejecución si hay errores de sintaxis de Python
+        flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+    # Nota: Descomentar una vez que configures tu base de datos de pruebas en CI
+    # - name: Run Django Migrations and Tests
+    #   run: |
+    #     cd backend
+    #     python manage.py test
+
+  # 2. Pruebas y Compilación del Frontend (SPA para DirectAdmin)
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 18
+        cache: 'npm'
+        cache-dependency-path: frontend/package.json
+        
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm install
+        
+    - name: Build React SPA
+      run: |
+        cd frontend
+        npm run build
+        
+    # Guardar los artefactos estáticos (HTML/CSS/JS) compilados listos para public_html
+    - name: Upload Static Build Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: nubcore-frontend-dist
+        path: frontend/dist/
+
+  # 3. Despliegue Automatizado (Opcional - Ejemplo FTP para Hosting Compartido)
+  # deploy-shared-hosting:
+  #   needs: [backend-tests, frontend-build]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Download Built Frontend
+  #     uses: actions/download-artifact@v3
+  #     with:
+  #       name: nubcore-frontend-dist
+  #       path: dist/
+  #
+  #   - name: Deploy to FTP (DirectAdmin public_html)
+  #     uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+  #     with:
+  #       server: ${{ secrets.FTP_SERVER }}
+  #       username: ${{ secrets.FTP_USERNAME }}
+  #       password: ${{ secrets.FTP_PASSWORD }}
+  #       local-dir: ./dist/
+  #       server-dir: /public_html/
