@@ -17,6 +17,7 @@ interface VacationRequest {
   comments: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
+  type?: 'complete' | 'days';
 }
 
 const VacationControl: React.FC = () => {
@@ -30,6 +31,31 @@ const VacationControl: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [comments, setComments] = useState('');
   const [formSubmitted, setFormSubmitted] = useState(false);
+  const [requestType, setRequestType] = useState<'complete' | 'days'>('days');
+
+  // Helper to add business days (excluding weekends)
+  const addBusinessDays = (startStr: string, days: number) => {
+    if (!startStr || days <= 0) return '';
+    
+    // We parse local date safely to avoid timezone shifting
+    const parts = startStr.split('-');
+    const current = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    
+    let targetDays = days - 1; // start date itself is day 1
+    
+    while (targetDays > 0) {
+      current.setDate(current.getDate() + 1);
+      const day = current.getDay();
+      if (day !== 0 && day !== 6) { // Not weekend
+        targetDays--;
+      }
+    }
+    
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
 
   // Default values for balances
   const [balance, setBalance] = useState({
@@ -37,6 +63,14 @@ const VacationControl: React.FC = () => {
     taken: 10,
     pending: 0
   });
+
+  useEffect(() => {
+    if (requestType === 'complete' && startDate && balance.available > 0) {
+      setEndDate(addBusinessDays(startDate, balance.available));
+    } else if (requestType === 'complete' && !startDate) {
+      setEndDate('');
+    }
+  }, [requestType, startDate, balance.available]);
 
   const fetchVacationRequests = async () => {
     try {
@@ -59,7 +93,8 @@ const VacationControl: React.FC = () => {
             days: 6,
             comments: "Vacaciones de invierno acumuladas.",
             status: 'pending',
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            type: 'days'
           },
           {
             id: "v_2",
@@ -71,7 +106,8 @@ const VacationControl: React.FC = () => {
             days: 10,
             comments: "Feriado anual legal.",
             status: 'approved',
-            createdAt: "2026-02-10T10:00:00Z"
+            createdAt: "2026-02-10T10:00:00Z",
+            type: 'complete'
           }
         ];
         localStorage.setItem('nubcore_vacation_requests', JSON.stringify(currentRequests));
@@ -137,16 +173,32 @@ const VacationControl: React.FC = () => {
       return;
     }
 
+    if (requestType === 'complete' && balance.available <= 0) {
+      alert("No tienes días hábiles disponibles para vacaciones completas.");
+      return;
+    }
+
     const calculated = calculateDays(startDate, endDate);
     if (calculated <= 0) {
       alert("Las fechas ingresadas no son válidas o corresponden a días de descanso.");
       return;
     }
 
-    if (calculated > balance.available) {
-      alert("No tienes suficientes días hábiles disponibles.");
-      return;
+    if (requestType === 'complete') {
+      if (calculated !== balance.available) {
+        alert(`Para vacaciones completas debes solicitar todos tus días disponibles (${balance.available} días).`);
+        return;
+      }
+    } else {
+      if (calculated > balance.available) {
+        alert("No tienes suficientes días hábiles disponibles.");
+        return;
+      }
     }
+
+    const prefixedComments = requestType === 'complete' 
+      ? `[Vacaciones Completas] ${comments}`.trim() 
+      : comments;
 
     const newRequest: VacationRequest = {
       id: `req_${Math.random().toString(36).substr(2, 9)}`,
@@ -156,9 +208,10 @@ const VacationControl: React.FC = () => {
       startDate,
       endDate,
       days: calculated,
-      comments,
+      comments: prefixedComments,
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      type: requestType
     };
 
     const updated = [newRequest, ...requests];
@@ -297,6 +350,34 @@ const VacationControl: React.FC = () => {
 
               <form onSubmit={handleRequestSubmit} className="space-y-4 text-xs font-semibold">
                 <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Modalidad de Solicitud</label>
+                  <div className="grid grid-cols-2 gap-2 p-0.5 bg-slate-100 dark:bg-[#070b15] rounded-xl border border-slate-200/60 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setRequestType('days')}
+                      className={`py-2 px-3 rounded-lg text-center transition-all cursor-pointer text-[10px] font-bold ${
+                        requestType === 'days'
+                          ? 'bg-white dark:bg-slate-900 text-brand-650 dark:text-brand-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      Días Señalados
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRequestType('complete')}
+                      className={`py-2 px-3 rounded-lg text-center transition-all cursor-pointer text-[10px] font-bold ${
+                        requestType === 'complete'
+                          ? 'bg-white dark:bg-slate-900 text-brand-650 dark:text-brand-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      Vacaciones Completas
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Inicio</label>
                   <input
                     type="date"
@@ -307,16 +388,34 @@ const VacationControl: React.FC = () => {
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Inclusive)</label>
-                  <input
-                    type="date"
-                    required
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
-                  />
-                </div>
+                {requestType === 'complete' ? (
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Calculada automáticamente)</label>
+                    <input
+                      type="date"
+                      disabled
+                      value={endDate}
+                      className="w-full px-3 py-2 bg-slate-100 border border-slate-200/50 dark:bg-[#070b15] dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-450 cursor-not-allowed font-bold"
+                    />
+                    {startDate && balance.available > 0 && (
+                      <p className="text-[9px] text-brand-600 dark:text-brand-450 font-bold mt-1.5 flex items-center gap-1 leading-normal">
+                        <Sparkles className="w-3 h-3 text-brand-500 animate-pulse shrink-0" />
+                        Calculado sumando tus {balance.available} días hábiles continuos disponibles.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Inclusive)</label>
+                    <input
+                      type="date"
+                      required
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                )}
 
                 {startDate && endDate && (
                   <div className="p-3 bg-brand-50/20 border border-brand-100/30 rounded-xl text-[11px] text-brand-700 dark:text-brand-400 flex items-center gap-2">
@@ -412,7 +511,18 @@ const VacationControl: React.FC = () => {
                         <User className="w-3.5 h-3.5" />
                       </div>
                       <div>
-                        <p className="font-bold text-slate-905 dark:text-white leading-none">{req.workerName}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-slate-905 dark:text-white leading-none">{req.workerName}</p>
+                          {req.type === 'complete' || req.comments.startsWith('[Vacaciones Completas]') ? (
+                            <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-bold">
+                              Completa
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded text-[9px] font-bold">
+                              Días Señalados
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[9px] text-slate-400 mt-1">Solicitado el {new Date(req.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
