@@ -20,7 +20,64 @@ interface VacationRequest {
   createdAt: string;
   type?: 'complete' | 'days';
   deletionRequested?: boolean;
+  selectedDates?: string[];
 }
+
+const formatDateString = (dateStr: string) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    // YYYY-MM-DD -> DD/MM/YYYY
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+};
+
+const getCleanCommentAndDates = (req: VacationRequest) => {
+  let cleanComment = req.comments || '';
+  let dates: string[] = req.selectedDates || [];
+
+  // Strip leading and trailing double quotes if present in raw string
+  cleanComment = cleanComment.trim();
+  if (cleanComment.startsWith('"') && cleanComment.endsWith('"')) {
+    cleanComment = cleanComment.slice(1, -1).trim();
+  }
+
+  // Parse legacy requests: "[Días Seleccionados: 27/05/2026, 28/05/2026] Comentarios..."
+  // Match either "Días Seleccionados" or "Días Señalados" (case-insensitive)
+  const prefixRegex = /^\[Días\s+(Seleccionados|Señalados):\s*([^\]]+)\]\s*(.*)$/i;
+  const match = cleanComment.match(prefixRegex);
+  
+  if (match) {
+    if (dates.length === 0) {
+      const dateStrings = match[2].split(',').map(s => s.trim());
+      dates = dateStrings.map(s => {
+        const parts = s.split('/');
+        if (parts.length === 3) {
+          // DD/MM/YYYY -> YYYY-MM-DD (with padStart for safety)
+          const dd = parts[0].padStart(2, '0');
+          const mm = parts[1].padStart(2, '0');
+          const yyyy = parts[2];
+          return `${yyyy}-${mm}-${dd}`;
+        }
+        return s;
+      });
+    }
+    cleanComment = match[3].trim();
+  }
+
+  // Also strip complete vacation prefix if present
+  if (cleanComment.startsWith('[Vacaciones Completas]')) {
+    cleanComment = cleanComment.replace(/^\[Vacaciones Completas\]\s*/i, '').trim();
+  }
+
+  // Double check if there are still outer quotes on the cleaned comment
+  if (cleanComment.startsWith('"') && cleanComment.endsWith('"')) {
+    cleanComment = cleanComment.slice(1, -1).trim();
+  }
+
+  return { cleanComment, dates };
+};
 
 const VacationControl: React.FC = () => {
   const { user } = useAuth();
@@ -35,6 +92,30 @@ const VacationControl: React.FC = () => {
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [requestType, setRequestType] = useState<'complete' | 'days'>('days');
 
+  // Custom inline calendar states
+  const [selectedDays, setSelectedDays] = useState<string[]>([]);
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date(2026, 4, 1)); // Mayo 2026
+
+  // Reset calendar selections when switching modalities
+  useEffect(() => {
+    setStartDate('');
+    setEndDate('');
+    setSelectedDays([]);
+  }, [requestType]);
+
+  // Synchronize selectedDays list with startDate and endDate for 'days' modality
+  useEffect(() => {
+    if (requestType === 'days') {
+      if (selectedDays.length > 0) {
+        setStartDate(selectedDays[0]);
+        setEndDate(selectedDays[selectedDays.length - 1]);
+      } else {
+        setStartDate('');
+        setEndDate('');
+      }
+    }
+  }, [selectedDays, requestType]);
+
   // Editing state (For HR / Admin)
   const [editingRequest, setEditingRequest] = useState<VacationRequest | null>(null);
   const [editStartDate, setEditStartDate] = useState('');
@@ -42,9 +123,217 @@ const VacationControl: React.FC = () => {
   const [editComments, setEditComments] = useState('');
   const [editType, setEditType] = useState<'complete' | 'days'>('days');
   const [editStatus, setEditStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [editSelectedDays, setEditSelectedDays] = useState<string[]>([]);
+  const [editCalendarDate, setEditCalendarDate] = useState(new Date(2026, 4, 1));
+  const [tempCompleteStartDate, setTempCompleteStartDate] = useState('');
+  const [tempDaysSelectedDays, setTempDaysSelectedDays] = useState<string[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: 'success' | 'warning' | 'error' = 'warning') => {
+    setToast({ message, type });
+  };
+  // Synchronize editSelectedDays list with editStartDate and editEndDate for 'days' modality
+  useEffect(() => {
+    if (editingRequest && editType === 'days') {
+      if (editSelectedDays.length > 0) {
+        setEditStartDate(editSelectedDays[0]);
+        setEditEndDate(editSelectedDays[editSelectedDays.length - 1]);
+      } else {
+        setEditStartDate('');
+        setEditEndDate('');
+      }
+    }
+  }, [editSelectedDays, editType, editingRequest?.id]);
 
   // Deleting confirmation state (For HR / Admin)
   const [deletingRequest, setDeletingRequest] = useState<VacationRequest | null>(null);
+
+  // Calendar month navigation handlers
+  const handlePrevMonth = () => {
+    setCurrentCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+  const handleNextMonth = () => {
+    setCurrentCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const getDayStr = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getCalendarDays = () => {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const offset = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
+
+    const days = [];
+    for (let i = 0; i < offset; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= totalDays; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  };
+
+  const handleDayClick = (date: Date) => {
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    if (isWeekend) {
+      showToast("Las vacaciones solo se pueden solicitar en días hábiles (lunes a viernes).", "warning");
+      return;
+    }
+
+    const dayStr = getDayStr(date);
+
+    if (requestType === 'complete') {
+      setStartDate(dayStr);
+    } else {
+      if (selectedDays.includes(dayStr)) {
+        setSelectedDays(prev => prev.filter(x => x !== dayStr));
+      } else {
+        if (selectedDays.length >= balance.available) {
+          showToast(`Has alcanzado el límite de tus días hábiles disponibles (${balance.available} días).`, "warning");
+          return;
+        }
+        setSelectedDays(prev => [...prev, dayStr].sort());
+      }
+    }
+  };
+
+  const getTodayStr = () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const WEEKDAYS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do'];
+  const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  const renderCalendar = () => {
+    const days = getCalendarDays();
+    const monthName = MONTHS[currentCalendarDate.getMonth()];
+    const year = currentCalendarDate.getFullYear();
+    const todayStr = getTodayStr();
+
+    return (
+      <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/80 p-3 rounded-2xl space-y-3.5 my-2">
+        <div className="flex items-center justify-between text-xs">
+          <button
+            type="button"
+            onClick={handlePrevMonth}
+            className="p-1 hover:bg-slate-250 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-850 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer text-[10px] font-bold"
+          >
+            &larr; Ant
+          </button>
+          <span className="font-extrabold uppercase tracking-wider text-slate-805 dark:text-white text-[10px]">
+            {monthName} {year}
+          </span>
+          <button
+            type="button"
+            onClick={handleNextMonth}
+            className="p-1 hover:bg-slate-250 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-850 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer text-[10px] font-bold"
+          >
+            Sig &rarr;
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-bold text-slate-400 dark:text-slate-555">
+          {WEEKDAYS.map(w => <span key={w}>{w}</span>)}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((d, idx) => {
+            if (!d) return <div key={`empty-${idx}`} />;
+
+            const dayStr = getDayStr(d);
+            const dayNum = d.getDate();
+            const dayOfWeek = d.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+            let isSelected = false;
+            let isInRange = false;
+
+            if (requestType === 'days') {
+              isSelected = selectedDays.includes(dayStr);
+            } else if (requestType === 'complete') {
+              isSelected = dayStr === startDate || dayStr === endDate;
+              isInRange = !!(startDate && endDate && dayStr >= startDate && dayStr <= endDate);
+            }
+
+            const isToday = dayStr === todayStr;
+            const dateStatus = getDateStatus(dayStr);
+            const isBooked = dateStatus !== null;
+
+            return (
+              <button
+                key={dayStr}
+                type="button"
+                onClick={() => handleDayClick(d)}
+                disabled={isWeekend || isBooked}
+                className={`py-1.5 text-center text-[10px] rounded-lg transition-all font-semibold relative flex flex-col items-center justify-center ${
+                  isWeekend
+                    ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed font-normal'
+                    : isBooked
+                      ? dateStatus === 'approved'
+                        ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 cursor-not-allowed font-bold'
+                        : 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 cursor-not-allowed font-bold'
+                      : isSelected
+                        ? 'bg-brand-600 text-white font-extrabold shadow-sm'
+                        : isInRange
+                          ? 'bg-brand-500/15 text-brand-650 dark:text-brand-400 font-extrabold border border-brand-200/20'
+                          : 'text-slate-705 hover:bg-slate-100 dark:text-slate-355 dark:hover:bg-slate-800'
+                } ${isToday ? 'border border-slate-350 dark:border-slate-600 bg-slate-150/40 dark:bg-slate-800/20' : ''}`}
+              >
+                <span>{dayNum}</span>
+                {isToday && (
+                  <span className={`absolute bottom-0.5 w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-brand-600 dark:bg-brand-400'} animate-pulse`} />
+                )}
+                {isBooked && (
+                  <span className={`absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full ${dateStatus === 'approved' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Color Legend */}
+        <div className="flex items-center justify-center gap-3 pt-2.5 border-t border-slate-200/30 dark:border-slate-800/40 text-[9px] font-bold text-slate-400 dark:text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-600" />
+            <span>Elegido</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Aprobado</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            <span>Pendiente</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full border border-slate-350 dark:border-slate-600 bg-transparent" />
+            <span>Hoy</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // Helper to add business days (excluding weekends)
   const addBusinessDays = (startStr: string, days: number) => {
@@ -68,6 +357,209 @@ const VacationControl: React.FC = () => {
     const mm = String(current.getMonth() + 1).padStart(2, '0');
     const dd = String(current.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getBusinessDaysArray = (startStr: string, endStr: string) => {
+    if (!startStr || !endStr) return [];
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    const dates: string[] = [];
+    const current = new Date(start);
+    while (current <= end) {
+      const day = current.getDay();
+      if (day !== 0 && day !== 6) { // not Sunday or Saturday
+        dates.push(getDayStr(current));
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  };
+
+  const getDateStatus = (dayStr: string, excludeRequestId?: string) => {
+    if (!user) return null;
+    
+    // Find active requests for this worker (or the worker of the editingRequest) that are not rejected
+    const targetWorkerId = editingRequest ? editingRequest.workerId : user.id;
+    const workerRequests = requests.filter(r => r.workerId === targetWorkerId && r.status !== 'rejected' && r.id !== excludeRequestId);
+    
+    for (const req of workerRequests) {
+      if (req.type === 'days') {
+        if (req.selectedDates && req.selectedDates.includes(dayStr)) {
+          return req.status;
+        }
+        // Fallback for legacy requests that don't have selectedDates but list them in comments
+        const parsed = getCleanCommentAndDates(req);
+        if (parsed.dates.includes(dayStr)) {
+          return req.status;
+        }
+      } else {
+        // Complete vacation range (excluding weekends)
+        if (dayStr >= req.startDate && dayStr <= req.endDate) {
+          const parts = dayStr.split('-');
+          const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          const dayOfWeek = d.getDay();
+          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            return req.status;
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  const getCalendarDaysForEdit = () => {
+    const year = editCalendarDate.getFullYear();
+    const month = editCalendarDate.getMonth();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const offset = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
+
+    const days = [];
+    for (let i = 0; i < offset; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= totalDays; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  };
+
+  const handleEditDayClick = (date: Date) => {
+    if (!editingRequest) return;
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    if (isWeekend) {
+      showToast("Las vacaciones solo se pueden solicitar en días hábiles (lunes a viernes).", "warning");
+      return;
+    }
+
+    const dayStr = getDayStr(date);
+    const workerBal = getWorkerBalance(editingRequest.workerId, editingRequest.id);
+
+    if (editType === 'complete') {
+      setEditStartDate(dayStr);
+    } else {
+      if (editSelectedDays.includes(dayStr)) {
+        setEditSelectedDays(prev => prev.filter(x => x !== dayStr));
+      } else {
+        if (editSelectedDays.length >= workerBal.available) {
+          showToast(`Has alcanzado el límite de días hábiles disponibles de este colaborador (${workerBal.available} días).`, "warning");
+          return;
+        }
+        setEditSelectedDays(prev => [...prev, dayStr].sort());
+      }
+    }
+  };
+
+  const renderEditCalendar = () => {
+    if (!editingRequest) return null;
+    const days = getCalendarDaysForEdit();
+    const monthName = MONTHS[editCalendarDate.getMonth()];
+    const year = editCalendarDate.getFullYear();
+    const todayStr = getTodayStr();
+
+    return (
+      <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/80 p-3 rounded-2xl space-y-3.5 my-2">
+        <div className="flex items-center justify-between text-xs">
+          <button
+            type="button"
+            onClick={() => setEditCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+            className="p-1 hover:bg-slate-250 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-850 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer text-[10px] font-bold"
+          >
+            &larr; Ant
+          </button>
+          <span className="font-extrabold uppercase tracking-wider text-slate-805 dark:text-white text-[10px]">
+            {monthName} {year}
+          </span>
+          <button
+            type="button"
+            onClick={() => setEditCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+            className="p-1 hover:bg-slate-250 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-850 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer text-[10px] font-bold"
+          >
+            Sig &rarr;
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-bold text-slate-400 dark:text-slate-555">
+          {WEEKDAYS.map(w => <span key={w}>{w}</span>)}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((d, idx) => {
+            if (!d) return <div key={`empty-${idx}`} />;
+
+            const dayStr = getDayStr(d);
+            const dayNum = d.getDate();
+            const dayOfWeek = d.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+            let isSelected = false;
+            let isInRange = false;
+
+            if (editType === 'days') {
+              isSelected = editSelectedDays.includes(dayStr);
+            } else if (editType === 'complete') {
+              isSelected = dayStr === editStartDate || dayStr === editEndDate;
+              isInRange = !!(editStartDate && editEndDate && dayStr >= editStartDate && dayStr <= editEndDate);
+            }
+
+            const isToday = dayStr === todayStr;
+            const dateStatus = getDateStatus(dayStr, editingRequest.id);
+            const isBooked = dateStatus !== null;
+
+            return (
+              <button
+                key={dayStr}
+                type="button"
+                onClick={() => handleEditDayClick(d)}
+                disabled={isWeekend || isBooked}
+                className={`py-1.5 text-center text-[10px] rounded-lg transition-all font-semibold relative flex flex-col items-center justify-center ${
+                  isWeekend
+                    ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed font-normal'
+                    : isBooked
+                      ? dateStatus === 'approved'
+                        ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 cursor-not-allowed font-bold'
+                        : 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 cursor-not-allowed font-bold'
+                      : isSelected
+                        ? 'bg-brand-600 text-white font-extrabold shadow-sm'
+                        : isInRange
+                          ? 'bg-brand-500/15 text-brand-650 dark:text-brand-400 font-extrabold border border-brand-200/20'
+                          : 'text-slate-705 hover:bg-slate-100 dark:text-slate-355 dark:hover:bg-slate-800'
+                } ${isToday ? 'border border-slate-350 dark:border-slate-600 bg-slate-150/40 dark:bg-slate-800/20' : ''}`}
+              >
+                <span>{dayNum}</span>
+                {isToday && (
+                  <span className={`absolute bottom-0.5 w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-brand-600 dark:bg-brand-400'} animate-pulse`} />
+                )}
+                {isBooked && (
+                  <span className={`absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full ${dateStatus === 'approved' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Color Legend */}
+        <div className="flex items-center justify-center gap-3 pt-2.5 border-t border-slate-200/30 dark:border-slate-800/40 text-[9px] font-bold text-slate-400 dark:text-slate-555">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-600" />
+            <span>Elegido</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Aprobado</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            <span>Pendiente</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full border border-slate-350 dark:border-slate-600 bg-transparent" />
+            <span>Hoy</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Helper to dynamically calculate worker balance
@@ -148,7 +640,8 @@ const VacationControl: React.FC = () => {
             comments: "Vacaciones de invierno acumuladas.",
             status: 'pending',
             createdAt: new Date().toISOString(),
-            type: 'days'
+            type: 'days',
+            selectedDates: ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-08"]
           },
           {
             id: "v_2",
@@ -161,7 +654,8 @@ const VacationControl: React.FC = () => {
             comments: "Feriado anual legal.",
             status: 'approved',
             createdAt: "2026-02-10T10:00:00Z",
-            type: 'complete'
+            type: 'complete',
+            selectedDates: ["2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13"]
           }
         ];
         localStorage.setItem('nubcore_vacation_requests', JSON.stringify(currentRequests));
@@ -204,36 +698,37 @@ const VacationControl: React.FC = () => {
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!startDate || !endDate) {
-      alert("Por favor elige fecha de inicio y fin.");
+      showToast("Por favor elige fecha de inicio y fin.", "warning");
       return;
     }
 
     if (requestType === 'complete' && balance.available <= 0) {
-      alert("No tienes días hábiles disponibles para vacaciones completas.");
+      showToast("No tienes días hábiles disponibles para vacaciones completas.", "error");
       return;
     }
 
-    const calculated = calculateDays(startDate, endDate);
+    const calculated = requestType === 'days' && selectedDays.length > 0
+      ? selectedDays.length
+      : calculateDays(startDate, endDate);
+
     if (calculated <= 0) {
-      alert("Las fechas ingresadas no son válidas o corresponden a días de descanso.");
+      showToast("Las fechas ingresadas no son válidas o corresponden a días de descanso.", "error");
       return;
     }
 
     if (requestType === 'complete') {
       if (calculated !== balance.available) {
-        alert(`Para vacaciones completas debes solicitar todos tus días disponibles (${balance.available} días).`);
+        showToast(`Para vacaciones completas debes solicitar todos tus días disponibles (${balance.available} días).`, "warning");
         return;
       }
     } else {
       if (calculated > balance.available) {
-        alert("No tienes suficientes días hábiles disponibles.");
+        showToast(`No tienes suficientes días hábiles disponibles. Intentas solicitar ${calculated} días pero solo dispones de ${balance.available} días.`, "error");
         return;
       }
     }
 
-    const prefixedComments = requestType === 'complete' 
-      ? `[Vacaciones Completas] ${comments}`.trim() 
-      : comments;
+    const cleanComments = comments.trim();
 
     const newRequest: VacationRequest = {
       id: `req_${Math.random().toString(36).substr(2, 9)}`,
@@ -243,10 +738,11 @@ const VacationControl: React.FC = () => {
       startDate,
       endDate,
       days: calculated,
-      comments: prefixedComments,
+      comments: cleanComments,
       status: 'pending',
       createdAt: new Date().toISOString(),
-      type: requestType
+      type: requestType,
+      selectedDates: requestType === 'days' ? [...selectedDays] : getBusinessDaysArray(startDate, endDate)
     };
 
     const updated = [newRequest, ...requests];
@@ -256,6 +752,7 @@ const VacationControl: React.FC = () => {
     setStartDate('');
     setEndDate('');
     setComments('');
+    showToast("Solicitud de vacaciones ingresada correctamente", "success");
     setFormSubmitted(true);
     
     fetchVacationRequests();
@@ -275,6 +772,7 @@ const VacationControl: React.FC = () => {
 
     setRequests(updated);
     localStorage.setItem('nubcore_vacation_requests', JSON.stringify(updated));
+    showToast(`Solicitud ${status === 'approved' ? 'aprobada' : 'rechazada'} con éxito`, "success");
     fetchVacationRequests();
   };
 
@@ -282,43 +780,68 @@ const VacationControl: React.FC = () => {
     setEditingRequest(req);
     setEditStartDate(req.startDate);
     setEditEndDate(req.endDate);
-    setEditComments(req.comments.replace(/^\[Vacaciones Completas\]\s*/, '').replace(/^\[Días Señalados\]\s*/, ''));
-    setEditType(req.type || (req.comments.startsWith('[Vacaciones Completas]') ? 'complete' : 'days'));
+    
+    const { cleanComment, dates } = getCleanCommentAndDates(req);
+    setEditComments(cleanComment);
+    
+    const type = req.type || (req.comments.startsWith('[Vacaciones Completas]') ? 'complete' : 'days');
+    setEditType(type);
     setEditStatus(req.status);
+
+    // Initialize selected days in edit state
+    if (type === 'days') {
+      setEditSelectedDays(dates);
+      setTempDaysSelectedDays(dates);
+      setTempCompleteStartDate('');
+    } else {
+      setEditSelectedDays(getBusinessDaysArray(req.startDate, req.endDate));
+      setTempDaysSelectedDays([]);
+      setTempCompleteStartDate(req.startDate);
+    }
+
+    // Set edit calendar month to start date's month
+    if (req.startDate) {
+      const parts = req.startDate.split('-');
+      if (parts.length === 3) {
+        setEditCalendarDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
+      }
+    }
   };
 
   const handleEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRequest) return;
     if (!editStartDate || !editEndDate) {
-      alert("Por favor elige fecha de inicio y fin.");
+      showToast("Por favor elige fecha de inicio y fin.", "warning");
       return;
     }
 
     const workerBal = getWorkerBalance(editingRequest.workerId, editingRequest.id);
-    const calculated = calculateDays(editStartDate, editEndDate);
+    const calculated = editType === 'days' && editSelectedDays.length > 0
+      ? editSelectedDays.length
+      : calculateDays(editStartDate, editEndDate);
 
     if (calculated <= 0) {
-      alert("Las fechas ingresadas no son válidas o corresponden a días de descanso.");
+      showToast("Las fechas ingresadas no son válidas o corresponden a días de descanso.", "error");
       return;
     }
 
     if (editType === 'complete') {
       if (calculated !== workerBal.available) {
-        alert(`Para vacaciones completas debes solicitar todos los días disponibles (${workerBal.available} días).`);
+        showToast(`Para vacaciones completas debes solicitar todos los días disponibles (${workerBal.available} días).`, "warning");
         return;
       }
     } else {
       if (calculated > workerBal.available) {
-        alert(`No hay suficientes días hábiles disponibles. El trabajador tiene ${workerBal.available} días.`);
+        showToast(`No hay suficientes días hábiles disponibles. Intentas solicitar ${calculated} días pero el colaborador solo dispone de ${workerBal.available} días.`, "error");
         return;
       }
     }
 
-    const cleanComments = editComments.replace(/^\[Vacaciones Completas\]\s*/, '').replace(/^\[Días Señalados\]\s*/, '');
-    const prefixedComments = editType === 'complete'
-      ? `[Vacaciones Completas] ${cleanComments}`.trim()
-      : cleanComments;
+    const cleanComments = editComments.trim();
+    const updatedSelectedDates = editType === 'days'
+      ? [...editSelectedDays]
+      : getBusinessDaysArray(editStartDate, editEndDate);
 
     const updated = requests.map((req) => {
       if (req.id === editingRequest.id) {
@@ -327,9 +850,10 @@ const VacationControl: React.FC = () => {
           startDate: editStartDate,
           endDate: editEndDate,
           days: calculated,
-          comments: prefixedComments,
+          comments: cleanComments,
           status: editStatus,
-          type: editType
+          type: editType,
+          selectedDates: updatedSelectedDates
         };
       }
       return req;
@@ -338,6 +862,7 @@ const VacationControl: React.FC = () => {
     setRequests(updated);
     localStorage.setItem('nubcore_vacation_requests', JSON.stringify(updated));
     setEditingRequest(null);
+    showToast("Cambios guardados con éxito", "success");
     fetchVacationRequests();
   };
 
@@ -348,6 +873,7 @@ const VacationControl: React.FC = () => {
       const updated = requests.filter(req => req.id !== deletingRequest.id);
       setRequests(updated);
       localStorage.setItem('nubcore_vacation_requests', JSON.stringify(updated));
+      showToast("Solicitud eliminada con éxito", "success");
     } else {
       const updated = requests.map(req => {
         if (req.id === deletingRequest.id) {
@@ -357,6 +883,7 @@ const VacationControl: React.FC = () => {
       });
       setRequests(updated);
       localStorage.setItem('nubcore_vacation_requests', JSON.stringify(updated));
+      showToast("Solicitud de eliminación enviada con éxito", "success");
     }
     
     setDeletingRequest(null);
@@ -497,61 +1024,87 @@ const VacationControl: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Custom Inline Calendar */}
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Inicio</label>
-                  <input
-                    type="date"
-                    required
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
-                  />
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Selecciona fechas en el Calendario</label>
+                  {renderCalendar()}
                 </div>
 
-                {requestType === 'complete' ? (
+                {/* Recap and Manual inputs (read-only/synced, styled for dark mode readability) */}
+                <div className="grid grid-cols-2 gap-3.5">
                   <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Calculada automáticamente)</label>
-                    <input
-                      type="date"
-                      disabled
-                      value={endDate}
-                      className="w-full px-3 py-2 bg-slate-100 border border-slate-200/50 dark:bg-[#070b15] dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-450 cursor-not-allowed font-bold"
-                    />
-                    {startDate && balance.available > 0 && (
-                      <p className="text-[9px] text-brand-600 dark:text-brand-450 font-bold mt-1.5 flex items-center gap-1 leading-normal">
-                        <Sparkles className="w-3 h-3 text-brand-500 animate-pulse shrink-0" />
-                        Calculado sumando tus {balance.available} días hábiles continuos disponibles.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Inclusive)</label>
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Fecha de Inicio</label>
                     <input
                       type="date"
                       required
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none text-slate-850 dark:text-slate-100 font-semibold"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Fecha de Fin</label>
+                    <input
+                      type="date"
+                      required
+                      disabled={requestType === 'complete'}
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
+                      className={`w-full px-3 py-2 border rounded-xl focus:border-brand-500 focus:outline-none text-slate-850 dark:text-slate-100 font-semibold ${
+                        requestType === 'complete'
+                          ? 'bg-slate-100 dark:bg-slate-950/60 border-slate-250 dark:border-slate-850 text-slate-450 dark:text-slate-500 cursor-not-allowed font-bold'
+                          : 'bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800'
+                      }`}
                     />
+                  </div>
+                </div>
+
+                {requestType === 'complete' && startDate && balance.available > 0 && (
+                  <p className="text-[9px] text-brand-605 dark:text-brand-450 font-bold mt-1.5 flex items-center gap-1 leading-normal pl-1">
+                    <Sparkles className="w-3 h-3 text-brand-500 animate-pulse shrink-0" />
+                    Calculado sumando tus {balance.available} días hábiles continuos disponibles.
+                  </p>
+                )}
+
+                {requestType === 'days' && selectedDays.length > 0 && (
+                  <div className="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-2">
+                    <p className="font-bold uppercase tracking-wider text-[8px] text-slate-400 dark:text-slate-555">Días seleccionados ({selectedDays.length}):</p>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                      {selectedDays.map(d => (
+                        <span 
+                          key={d} 
+                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-500/10 hover:bg-brand-500/20 dark:bg-brand-400/10 dark:hover:bg-brand-400/20 text-brand-650 dark:text-brand-400 border border-brand-500/20 dark:border-brand-400/25 rounded-md text-[9px] font-mono transition-colors"
+                        >
+                          {d.split('-').reverse().join('/')}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDays(prev => prev.filter(x => x !== d))}
+                            className="hover:text-rose-500 dark:hover:text-rose-455 transition-colors cursor-pointer"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {startDate && endDate && (
                   <div className="p-3 bg-brand-50/20 border border-brand-100/30 rounded-xl text-[11px] text-brand-700 dark:text-brand-400 flex items-center gap-2">
                     <Info className="w-4 h-4 text-brand-500 shrink-0" />
-                    <span>Días solicitados: <b>{calculateDays(startDate, endDate)} días hábiles</b> (excluye fines de semana).</span>
+                    <span>Días solicitados: <b>{requestType === 'days' && selectedDays.length > 0 ? selectedDays.length : calculateDays(startDate, endDate)} días hábiles</b> (excluye fines de semana).</span>
                   </div>
                 )}
 
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wide">Comentarios / Justificación</label>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Comentarios / Justificación</label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     placeholder="Detalles de la solicitud..."
                     value={comments}
                     onChange={(e) => setComments(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none resize-none"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none resize-none text-slate-850 dark:text-slate-100"
                   />
                 </div>
 
@@ -620,51 +1173,74 @@ const VacationControl: React.FC = () => {
                 No hay solicitudes de vacaciones registradas.
               </div>
             ) : (
-              getFilteredRequests().map((req) => (
-                <div 
-                  key={req.id}
-                  className="p-4 bg-white/60 dark:bg-[#0c111f]/45 border border-white/60 dark:border-slate-850/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-slate-350 dark:hover:border-slate-800 transition-all text-xs font-semibold"
-                >
-                  <div className="space-y-2 min-w-0">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-6.5 h-6.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0">
-                        <User className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-bold text-slate-905 dark:text-white leading-none">{req.workerName}</p>
-                          {req.type === 'complete' || req.comments.startsWith('[Vacaciones Completas]') ? (
-                            <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-bold">
-                              Completa
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded text-[9px] font-bold">
-                              Días Señalados
-                            </span>
-                          )}
-                          {req.deletionRequested && (
-                            <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-455 border border-rose-500/20 rounded text-[9px] font-bold flex items-center gap-1 animate-pulse">
-                              <AlertTriangle className="w-2.5 h-2.5 animate-bounce" />
-                              Eliminación Solicitada
-                            </span>
-                          )}
-                        </div>
-                         <p className="text-[9px] text-slate-400 mt-1">Solicitado el {new Date(req.createdAt).toLocaleDateString()}</p>
-                      </div>
-                    </div>
+              getFilteredRequests().map((req) => {
+                const { cleanComment, dates: reqDates } = getCleanCommentAndDates(req);
+                const isComplete = req.type === 'complete' || req.comments.startsWith('[Vacaciones Completas]');
 
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-1 font-medium pl-9">
-                      <p>
-                        Período: <span className="font-bold text-slate-700 dark:text-slate-300">{new Date(req.startDate).toLocaleDateString()} al {new Date(req.endDate).toLocaleDateString()}</span>
-                      </p>
-                      <p>
-                        Días Hábiles: <span className="font-bold text-brand-600 dark:text-brand-400">{req.days} días</span>
-                      </p>
-                      {req.comments && (
-                        <p className="italic text-slate-400">"{req.comments}"</p>
-                      )}
+                return (
+                  <div 
+                    key={req.id}
+                    className="p-4 bg-white/60 dark:bg-[#0c111f]/45 border border-white/60 dark:border-slate-850/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-slate-350 dark:hover:border-slate-800 transition-all text-xs font-semibold"
+                  >
+                    <div className="space-y-2 min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6.5 h-6.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-slate-905 dark:text-white leading-none">{req.workerName}</p>
+                            {isComplete ? (
+                              <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-bold">
+                                Completa
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded text-[9px] font-bold">
+                                Días Señalados
+                              </span>
+                            )}
+                            {req.deletionRequested && (
+                              <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-455 border border-rose-500/20 rounded text-[9px] font-bold flex items-center gap-1 animate-pulse">
+                                <AlertTriangle className="w-2.5 h-2.5 animate-bounce" />
+                                Eliminación Solicitada
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-slate-400 mt-1">Solicitado el {new Date(req.createdAt).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-1 font-medium pl-9">
+                        <p>
+                          Período: <span className="font-bold text-slate-700 dark:text-slate-300">{formatDateString(req.startDate)} al {formatDateString(req.endDate)}</span>
+                        </p>
+                        <p>
+                          Días Hábiles: <span className="font-bold text-brand-600 dark:text-brand-400">{req.days} días</span>
+                        </p>
+                        
+                        {!isComplete && reqDates.length > 0 && (
+                          <div className="mt-1.5">
+                            <details className="group">
+                              <summary className="text-[9px] text-slate-400 dark:text-slate-500 hover:text-brand-500 dark:hover:text-brand-400 cursor-pointer list-none flex items-center gap-1 select-none font-bold">
+                                <span className="transition-transform group-open:rotate-90 inline-block font-mono text-[8px]">&gt;</span>
+                                <span>Ver {reqDates.length} días señalados</span>
+                              </summary>
+                              <div className="flex flex-wrap gap-1 mt-1.5 pl-2 max-w-md">
+                                {reqDates.map(d => (
+                                  <span key={d} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/50 rounded text-[9px] font-mono text-slate-600 dark:text-slate-400">
+                                    {d.split('-').reverse().join('/')}
+                                  </span>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                        )}
+
+                        {cleanComment && (
+                          <p className="italic text-slate-400 dark:text-slate-500 mt-1.5">"{cleanComment}"</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
                   <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-850/40 shrink-0">
                     {/* Status Badge */}
@@ -801,7 +1377,8 @@ const VacationControl: React.FC = () => {
                     )}
                   </div>
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         </div>
@@ -809,8 +1386,10 @@ const VacationControl: React.FC = () => {
 
       {/* Edit Request Modal */}
       {editingRequest && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bento-card max-w-md w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200">
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setEditingRequest(null)} />
+          <div className="flex min-h-full items-center justify-center p-4 md:p-8 relative z-10 pointer-events-none">
+            <div className="bento-card max-w-md w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200 pointer-events-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-850/40">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                 <Edit2 className="w-4 h-4 text-brand-500" />
@@ -830,7 +1409,13 @@ const VacationControl: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 p-0.5 bg-slate-100 dark:bg-[#070b15] rounded-xl border border-slate-200/60 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setEditType('days')}
+                    onClick={() => {
+                      if (editType !== 'days') {
+                        setTempCompleteStartDate(editStartDate);
+                        setEditType('days');
+                        setEditSelectedDays(tempDaysSelectedDays);
+                      }
+                    }}
                     className={`py-2 px-3 rounded-lg text-center transition-all cursor-pointer text-[10px] font-bold ${
                       editType === 'days'
                         ? 'bg-white dark:bg-slate-900 text-brand-650 dark:text-brand-400 shadow-sm'
@@ -841,7 +1426,14 @@ const VacationControl: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEditType('complete')}
+                    onClick={() => {
+                      if (editType !== 'complete') {
+                        setTempDaysSelectedDays(editSelectedDays);
+                        setEditType('complete');
+                        setEditStartDate(tempCompleteStartDate);
+                        setEditSelectedDays([]);
+                      }
+                    }}
                     className={`py-2 px-3 rounded-lg text-center transition-all cursor-pointer text-[10px] font-bold ${
                       editType === 'complete'
                         ? 'bg-white dark:bg-slate-900 text-brand-650 dark:text-brand-400 shadow-sm'
@@ -853,43 +1445,75 @@ const VacationControl: React.FC = () => {
                 </div>
               </div>
 
+              {/* Edit Calendar */}
               <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Inicio</label>
-                <input
-                  type="date"
-                  required
-                  value={editStartDate}
-                  onChange={(e) => setEditStartDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
-                />
+                <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Selecciona fechas en el Calendario</label>
+                {renderEditCalendar()}
               </div>
 
-              {editType === 'complete' ? (
+              <div className="grid grid-cols-2 gap-3.5">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Calculada automáticamente)</label>
-                  <input
-                    type="date"
-                    disabled
-                    value={editEndDate}
-                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200/50 dark:bg-[#070b15] dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-450 cursor-not-allowed font-bold"
-                  />
-                  {editStartDate && getWorkerBalance(editingRequest.workerId, editingRequest.id).available > 0 && (
-                    <p className="text-[9px] text-brand-600 dark:text-brand-455 font-bold mt-1.5 flex items-center gap-1 leading-normal">
-                      <Sparkles className="w-3 h-3 text-brand-500 animate-pulse shrink-0" />
-                      Calculado sumando {getWorkerBalance(editingRequest.workerId, editingRequest.id).available} días hábiles disponibles.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wide">Fecha de Fin (Inclusive)</label>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Fecha de Inicio</label>
                   <input
                     type="date"
                     required
-                    value={editEndDate}
-                    onChange={(e) => setEditEndDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none text-slate-850 dark:text-slate-100 font-semibold"
                   />
+                </div>
+
+                {editType === 'complete' ? (
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Fecha de Fin</label>
+                    <input
+                      type="date"
+                      disabled
+                      value={editEndDate}
+                      className="w-full px-3 py-2 bg-slate-100 border border-slate-200/50 dark:bg-[#070b15] dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-450 cursor-not-allowed font-bold"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Fecha de Fin</label>
+                    <input
+                      type="date"
+                      required
+                      value={editEndDate}
+                      onChange={(e) => setEditEndDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none text-slate-850 dark:text-slate-100 font-semibold"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {editType === 'complete' && editStartDate && getWorkerBalance(editingRequest.workerId, editingRequest.id).available > 0 && (
+                <p className="text-[9px] text-brand-600 dark:text-brand-455 font-bold mt-1 flex items-center gap-1 leading-normal pl-1">
+                  <Sparkles className="w-3 h-3 text-brand-500 animate-pulse shrink-0" />
+                  Calculado sumando {getWorkerBalance(editingRequest.workerId, editingRequest.id).available} días hábiles disponibles.
+                </p>
+              )}
+
+              {editType === 'days' && editSelectedDays.length > 0 && (
+                <div className="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-2">
+                  <p className="font-bold uppercase tracking-wider text-[8px] text-slate-400 dark:text-slate-555">Días seleccionados ({editSelectedDays.length}):</p>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                    {editSelectedDays.map(d => (
+                      <span 
+                        key={d} 
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-500/10 hover:bg-brand-500/20 dark:bg-brand-400/10 dark:hover:bg-brand-400/20 text-brand-650 dark:text-brand-400 border border-brand-500/20 dark:border-brand-400/25 rounded-md text-[9px] font-mono transition-colors"
+                      >
+                        {d.split('-').reverse().join('/')}
+                        <button
+                          type="button"
+                          onClick={() => setEditSelectedDays(prev => prev.filter(x => x !== d))}
+                          className="hover:text-rose-500 dark:hover:text-rose-455 transition-colors cursor-pointer"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -897,17 +1521,17 @@ const VacationControl: React.FC = () => {
                 <div className="p-3 bg-brand-50/20 border border-brand-100/30 rounded-xl text-[11px] text-brand-700 dark:text-brand-400 flex items-center gap-2">
                   <Info className="w-4 h-4 text-brand-500 shrink-0" />
                   <span>
-                    Días a descontar: <b>{calculateDays(editStartDate, editEndDate)} días hábiles</b> (Disponibles: {getWorkerBalance(editingRequest.workerId, editingRequest.id).available} días).
+                    Días a descontar: <b>{editType === 'days' && editSelectedDays.length > 0 ? editSelectedDays.length : calculateDays(editStartDate, editEndDate)} días hábiles</b> (Disponibles: {getWorkerBalance(editingRequest.workerId, editingRequest.id).available} días).
                   </span>
                 </div>
               )}
 
               <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 uppercase tracking-wide">Estado de la Solicitud</label>
+                <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Estado de la Solicitud</label>
                 <select
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none text-slate-800 dark:text-slate-100 dark:bg-slate-900"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none text-slate-850 dark:text-slate-100"
                 >
                   <option value="pending">Pendiente de Aprobación</option>
                   <option value="approved">Aprobada</option>
@@ -916,13 +1540,13 @@ const VacationControl: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 uppercase tracking-wide">Comentarios / Justificación</label>
+                <label className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Comentarios / Justificación</label>
                 <textarea
                   rows={2}
                   placeholder="Detalles de la solicitud..."
                   value={editComments}
                   onChange={(e) => setEditComments(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 dark:bg-slate-950/40 dark:border-slate-850 rounded-xl focus:border-brand-500 focus:outline-none resize-none"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 dark:bg-slate-900 dark:border-slate-800 rounded-xl focus:border-brand-500 focus:outline-none resize-none text-slate-850 dark:text-slate-100"
                 />
               </div>
 
@@ -942,14 +1566,17 @@ const VacationControl: React.FC = () => {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}
 
       {/* Delete / Request Deletion Confirmation Modal */}
       {deletingRequest && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bento-card max-w-sm w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200">
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDeletingRequest(null)} />
+          <div className="flex min-h-full items-center justify-center p-4 md:p-8 relative z-10 pointer-events-none">
+            <div className="bento-card max-w-sm w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200 pointer-events-auto">
             <div className="flex items-center gap-3 pb-2 border-b border-slate-100 dark:border-slate-850/40">
               <div className={`p-2 rounded-lg ${user?.role === 'admin' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
                 <Trash2 className="w-5 h-5 animate-pulse" />
@@ -968,14 +1595,14 @@ const VacationControl: React.FC = () => {
               </button>
             </div>
 
-            <div className="text-slate-600 dark:text-slate-350 font-medium leading-relaxed">
+            <div className="text-slate-600 dark:text-slate-355 font-medium leading-relaxed">
               {user?.role === 'admin' ? (
                 <span>
-                  ¿Estás seguro de que deseas eliminar permanentemente la solicitud de vacaciones de <b>{deletingRequest.workerName}</b> del <b>{new Date(deletingRequest.startDate).toLocaleDateString()}</b> al <b>{new Date(deletingRequest.endDate).toLocaleDateString()}</b>? Esta acción no se puede deshacer y reconfigurará los días hábiles disponibles inmediatamente.
+                  ¿Estás seguro de que deseas eliminar permanentemente la solicitud de vacaciones de <b>{deletingRequest.workerName}</b> del <b>{formatDateString(deletingRequest.startDate)}</b> al <b>{formatDateString(deletingRequest.endDate)}</b>? Esta acción no se puede deshacer y reconfigurará los días hábiles disponibles inmediatamente.
                 </span>
               ) : (
                 <span>
-                  ¿Deseas enviar una solicitud al administrador de la empresa para eliminar la solicitud de vacaciones de <b>{deletingRequest.workerName}</b> del <b>{new Date(deletingRequest.startDate).toLocaleDateString()}</b> al <b>{new Date(deletingRequest.endDate).toLocaleDateString()}</b>?
+                  ¿Deseas enviar una solicitud al administrador de la empresa para eliminar la solicitud de vacaciones de <b>{deletingRequest.workerName}</b> del <b>{formatDateString(deletingRequest.startDate)}</b> al <b>{formatDateString(deletingRequest.endDate)}</b>?
                 </span>
               )}
             </div>
@@ -999,6 +1626,27 @@ const VacationControl: React.FC = () => {
                 {user?.role === 'admin' ? 'Eliminar Definitivamente' : 'Enviar Solicitud'}
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[100] animate-in slide-in-from-bottom duration-300">
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold max-w-sm ${
+            toast.type === 'error'
+              ? 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400 dark:bg-rose-950/20'
+              : toast.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 dark:bg-emerald-950/20'
+                : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400 dark:bg-amber-950/20'
+          }`}>
+            {toast.type === 'error' && <AlertTriangle className="w-5 h-5 shrink-0 text-rose-500 dark:text-rose-455" />}
+            {toast.type === 'success' && <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 dark:text-emerald-400" />}
+            {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 dark:text-amber-400" />}
+            <span className="flex-1 text-slate-800 dark:text-slate-100">{toast.message}</span>
+            <button type="button" onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer ml-2">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
