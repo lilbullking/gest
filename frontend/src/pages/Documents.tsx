@@ -58,6 +58,7 @@ const Documents: React.FC = () => {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedDoc, setSelectedDoc] = useState<DocumentInfo | null>(null);
+  const [docToDelete, setDocToDelete] = useState<DocumentInfo | null>(null);
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -169,14 +170,13 @@ const Documents: React.FC = () => {
   };
 
   const handleDeleteDoc = async (id: string) => {
-    if (window.confirm("¿Estás seguro de que deseas archivar este documento? Se mantendrá en los logs de auditoría.")) {
-      try {
-        await documentAPI.delete(id);
-        setSelectedDoc(null);
-        fetchDocuments();
-      } catch (error) {
-        console.error("Error al borrar", error);
-      }
+    try {
+      await documentAPI.delete(id);
+      setSelectedDoc(null);
+      setDocToDelete(null);
+      fetchDocuments();
+    } catch (error) {
+      console.error("Error al borrar", error);
     }
   };
 
@@ -548,7 +548,7 @@ const Documents: React.FC = () => {
               </a>
               {user?.role === 'admin' && (
                 <button
-                  onClick={() => handleDeleteDoc(selectedDoc.id)}
+                  onClick={() => setDocToDelete(selectedDoc)}
                   className="p-2 bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-600 dark:bg-red-950/20 dark:border-red-900/40 dark:text-rose-400 rounded-xl transition-all hover-scale"
                   title="Archivar"
                 >
@@ -706,6 +706,58 @@ const Documents: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Confirmation Delete Modal */}
+      {docToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDocToDelete(null)} />
+          <div className="flex min-h-full items-center justify-center p-4 md:p-8 relative z-10 pointer-events-none">
+            <div className="bento-card max-w-sm w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200 pointer-events-auto">
+              
+              <div className="flex items-center gap-3 pb-2 border-b border-slate-100 dark:border-slate-850/40">
+                <div className="p-2 bg-rose-500/10 text-rose-600 dark:text-rose-455 rounded-lg">
+                  <Trash2 className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Archivar Documento
+                  </h3>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Confirmar acción de eliminación</p>
+                </div>
+                <button 
+                  onClick={() => setDocToDelete(null)}
+                  className="text-slate-400 hover:text-slate-655 dark:hover:text-slate-200 cursor-pointer ml-auto"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="text-slate-600 dark:text-slate-355 font-medium leading-relaxed text-[11px]">
+                <span>
+                  ¿Estás seguro de que deseas archivar el documento <b>{docToDelete.title}</b>? El archivo ya no estará disponible en el panel general de búsqueda, pero se conservará en los registros históricos de auditoría de la empresa.
+                </span>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDocToDelete(null)}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-355 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => handleDeleteDoc(docToDelete.id)}
+                  className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/10 transition-colors cursor-pointer"
+                >
+                  Confirmar y Archivar
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

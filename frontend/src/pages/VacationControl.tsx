@@ -128,6 +128,7 @@ const VacationControl: React.FC = () => {
   const [tempCompleteStartDate, setTempCompleteStartDate] = useState('');
   const [tempDaysSelectedDays, setTempDaysSelectedDays] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
+  const [showRegulationsModal, setShowRegulationsModal] = useState(false);
 
   useEffect(() => {
     if (toast) {
@@ -932,56 +933,89 @@ const VacationControl: React.FC = () => {
               : 'Gestión y aprobación de solicitudes de feriado legal de la plantilla.'}
           </p>
         </div>
+        {user?.role !== 'employee' && (
+          <button
+            onClick={() => setShowRegulationsModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-250 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-350 border border-slate-200/50 dark:border-slate-800/80 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+          >
+            <Info className="w-4.5 h-4.5 text-brand-500" />
+            <span>Ver Normativa</span>
+          </button>
+        )}
       </div>
 
       {/* KPI Cards (Available, Taken, Pending) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        <div className="bento-card p-5 flex flex-col justify-between">
-          <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-            {user?.role === 'employee' ? 'Mis Días Disponibles' : 'Días Pendientes de Aprobación'}
-          </span>
-          <h3 className="text-3xl font-black mt-2 font-sans text-brand-605 dark:text-brand-400">
-            {user?.role === 'employee' ? balance.available : requests.filter(r => r.status === 'pending').reduce((acc, cur) => acc + cur.days, 0)} días
-          </h3>
-          <p className="text-[10px] text-slate-400 mt-4">
-            {user?.role === 'employee' ? 'Feriado legal anual acumulado actual' : 'Total acumulado en solicitudes en cola'}
-          </p>
+        {/* Card 1: Días Disponibles / Días Pendientes */}
+        <div className="bento-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-brand-500/30 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
+          <div className="flex items-start justify-between">
+            <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+              {user?.role === 'employee' ? 'Mis Días Disponibles' : 'Días Pendientes de Aprobación'}
+            </span>
+            <div className="p-2 bg-brand-500/10 dark:bg-brand-400/10 text-brand-600 dark:text-brand-450 rounded-xl group-hover:scale-110 transition-transform">
+              <Calendar className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-black font-sans text-brand-650 dark:text-brand-400 tracking-tight">
+              {user?.role === 'employee' 
+                ? `${balance.available} días` 
+                : `${requests.filter(r => r.status === 'pending').reduce((acc, cur) => acc + cur.days, 0)} días`}
+            </h3>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+              {user?.role === 'employee' ? 'Feriado legal anual acumulado actual' : 'Total acumulado en solicitudes en cola'}
+            </p>
+          </div>
         </div>
 
-        <div className="bento-card p-5 flex flex-col justify-between">
-          <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-            {user?.role === 'employee' ? 'Días Consumidos' : 'Colaboradores de Vacaciones Hoy'}
-          </span>
-          <h3 className="text-3xl font-black mt-2 font-sans text-emerald-600 dark:text-emerald-450">
-            {user?.role === 'employee' ? `${balance.taken} días` : `${activeVacationsTodayCount} colaboradores`}
-          </h3>
-          <p className="text-[10px] text-slate-400 mt-4">
-            {user?.role === 'employee' ? 'Días de feriado legal efectivamente gozados' : 'Colaboradores ausentes en este momento'}
-          </p>
+        {/* Card 2: Días Consumidos / Colaboradores de Vacaciones */}
+        <div className="bento-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-emerald-500/30 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
+          <div className="flex items-start justify-between">
+            <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+              {user?.role === 'employee' ? 'Días Consumidos' : 'Colaboradores de Vacaciones Hoy'}
+            </span>
+            <div className="p-2 bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 rounded-xl group-hover:scale-110 transition-transform">
+              <User className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-black font-sans text-emerald-600 dark:text-emerald-450 tracking-tight">
+              {user?.role === 'employee' ? `${balance.taken} días` : `${activeVacationsTodayCount} colaboradores`}
+            </h3>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+              {user?.role === 'employee' ? 'Días de feriado legal efectivamente gozados' : 'Colaboradores ausentes en este momento'}
+            </p>
+          </div>
         </div>
 
-        <div className="bento-card p-5 flex flex-col justify-between">
-          <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-            {user?.role === 'employee' ? 'En Trámite de Aprobación' : 'Total Solicitudes en el Mes'}
-          </span>
-          <h3 className="text-3xl font-black mt-2 font-sans text-amber-600 dark:text-amber-400">
-            {user?.role === 'employee' ? balance.pending : requests.length} días
-          </h3>
-          <p className="text-[10px] text-slate-400 mt-4">
-            {user?.role === 'employee' ? 'Días sujetos a autorización de la jefatura' : 'Volumen total registrado históricamente'}
-          </p>
+        {/* Card 3: En Trámite / Total Solicitudes */}
+        <div className="bento-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-amber-500/30 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
+          <div className="flex items-start justify-between">
+            <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+              {user?.role === 'employee' ? 'En Trámite de Aprobación' : 'Total Solicitudes en el Mes'}
+            </span>
+            <div className="p-2 bg-amber-500/10 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 rounded-xl group-hover:scale-110 transition-transform">
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-black font-sans text-amber-600 dark:text-amber-450 tracking-tight">
+              {user?.role === 'employee' ? `${balance.pending} días` : `${requests.length} solicitudes`}
+            </h3>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+              {user?.role === 'employee' ? 'Días sujetos a autorización de la jefatura' : 'Volumen total registrado históricamente'}
+            </p>
+          </div>
         </div>
 
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* Left Side: Forms or summaries depending on role */}
-        <div className="lg:col-span-1 space-y-6">
-          
-          {user?.role === 'employee' ? (
-            // ============ EMPLOYEE SUBMIT FORM ============
+        {/* Left Side: Forms or summaries depending on role (Only for Employee) */}
+        {user?.role === 'employee' && (
+          <div className="lg:col-span-1 space-y-6">
             <div className="bento-card p-5.5 space-y-4">
               <h3 className="text-xs font-extrabold uppercase tracking-widest text-brand-600 dark:text-brand-400 flex items-center gap-1.5">
                 <PlusCircle className="w-4.5 h-4.5" />
@@ -1116,38 +1150,11 @@ const VacationControl: React.FC = () => {
                 </button>
               </form>
             </div>
-          ) : (
-            // ============ ADMIN REGULATIONS PANEL ============
-            <div className="bento-card p-5.5 space-y-4">
-              <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-450 flex items-center gap-1.5">
-                <Info className="w-4.5 h-4.5 text-brand-500" />
-                Normativa Feriado Legal Chile
-              </h3>
-              
-              <div className="space-y-3.5 text-xs text-slate-550 dark:text-slate-400 leading-relaxed font-medium">
-                <p>
-                  1. <b>Feriado Básico:</b> Todo trabajador con más de un año de servicio tiene derecho a 15 días hábiles de vacaciones remuneradas.
-                </p>
-                <p>
-                  2. <b>Hábiles:</b> Los días de vacaciones se cuentan de lunes a viernes. Los sábados, domingos y feriados no computan.
-                </p>
-                <p>
-                  3. <b>Continuidad:</b> El trabajador debe solicitar al menos 10 días seguidos. El resto puede fraccionarse de común acuerdo.
-                </p>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-850/40 text-center">
-                <span className="text-[9px] font-bold text-emerald-650 bg-emerald-500/5 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  Cumplimiento del Código del Trabajo
-                </span>
-              </div>
-            </div>
-          )}
-
-        </div>
+          </div>
+        )}
 
         {/* Right Side: Requests List */}
-        <div className="lg:col-span-2 bento-card p-6.5 space-y-4">
+        <div className={`${user?.role === 'employee' ? 'lg:col-span-2' : 'lg:col-span-3'} bento-card p-6.5 space-y-4`}>
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
               <Calendar className="w-4.5 h-4.5 text-brand-600" />
@@ -1155,13 +1162,13 @@ const VacationControl: React.FC = () => {
             </h3>
 
             <div className="relative w-full sm:w-52">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-450 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Filtrar..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8.5 pr-3.5 py-1.5 bg-white border border-slate-200 dark:bg-slate-900/60 dark:border-slate-800 rounded-xl text-xs focus:border-brand-500 focus:outline-none transition-colors"
+                className="w-full pl-9.5 pr-3.5 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-brand-500 focus:outline-none transition-colors text-slate-800 dark:text-slate-100 font-semibold"
               />
             </div>
           </div>
@@ -1180,39 +1187,39 @@ const VacationControl: React.FC = () => {
                 return (
                   <div 
                     key={req.id}
-                    className="p-4 bg-white/60 dark:bg-[#0c111f]/45 border border-white/60 dark:border-slate-850/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-slate-350 dark:hover:border-slate-800 transition-all text-xs font-semibold"
+                    className="p-5 bg-white/70 dark:bg-slate-900/35 border border-slate-150 dark:border-slate-800/65 rounded-[20px] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-brand-500/30 dark:hover:border-brand-500/20 hover:bg-white dark:hover:bg-[#0c111f]/60 hover:shadow-[0_8px_30px_rgba(0,0,0,0.02)] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.15)] transition-all duration-300 text-xs font-semibold"
                   >
-                    <div className="space-y-2 min-w-0 flex-1">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-6.5 h-6.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0">
-                          <User className="w-3.5 h-3.5" />
+                    <div className="space-y-2.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-brand-500/10 text-brand-600 dark:bg-brand-400/10 dark:text-brand-400 rounded-xl flex items-center justify-center font-bold shrink-0">
+                          <User className="w-4 h-4" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-bold text-slate-905 dark:text-white leading-none">{req.workerName}</p>
+                            <p className="font-bold text-slate-905 dark:text-white leading-none text-[13px]">{req.workerName}</p>
                             {isComplete ? (
-                              <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-bold">
+                              <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 rounded-lg text-[9px] font-bold">
                                 Completa
                               </span>
                             ) : (
-                              <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded text-[9px] font-bold">
+                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/15 rounded-lg text-[9px] font-bold">
                                 Días Señalados
                               </span>
                             )}
                             {req.deletionRequested && (
-                              <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-455 border border-rose-500/20 rounded text-[9px] font-bold flex items-center gap-1 animate-pulse">
+                              <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-455 border border-rose-500/15 rounded-lg text-[9px] font-bold flex items-center gap-1 animate-pulse">
                                 <AlertTriangle className="w-2.5 h-2.5 animate-bounce" />
                                 Eliminación Solicitada
                               </span>
                             )}
                           </div>
-                          <p className="text-[9px] text-slate-400 mt-1">Solicitado el {new Date(req.createdAt).toLocaleDateString()}</p>
+                          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Solicitado el {new Date(req.createdAt).toLocaleDateString()}</p>
                         </div>
                       </div>
 
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-1 font-medium pl-9">
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-1.5 font-medium pl-12">
                         <p>
-                          Período: <span className="font-bold text-slate-700 dark:text-slate-300">{formatDateString(req.startDate)} al {formatDateString(req.endDate)}</span>
+                          Período: <span className="font-bold text-slate-700 dark:text-slate-350">{formatDateString(req.startDate)} al {formatDateString(req.endDate)}</span>
                         </p>
                         <p>
                           Días Hábiles: <span className="font-bold text-brand-600 dark:text-brand-400">{req.days} días</span>
@@ -1242,143 +1249,143 @@ const VacationControl: React.FC = () => {
                       </div>
                     </div>
 
-                  <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-850/40 shrink-0">
-                    {/* Status Badge */}
-                    {req.status === 'approved' && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="flex items-center gap-1 px-3 py-1 bg-emerald-50 text-emerald-650 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-455 dark:border-emerald-900/30 rounded-full text-[10px] font-bold">
-                          <Check className="w-3 h-3" />
-                          Aprobada
-                        </span>
-                        {user?.role !== 'employee' && (
-                          <>
-                            <button
-                              onClick={() => openEditModal(req)}
-                              className="p-1.5 bg-slate-500/10 hover:bg-slate-500 text-slate-655 hover:text-white dark:text-slate-350 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Editar Solicitud"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {user?.role === 'admin' ? (
-                              <button
-                                onClick={() => setDeletingRequest(req)}
-                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-605 hover:text-white dark:text-rose-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                title="Eliminar permanentemente"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            ) : (
-                              !req.deletionRequested && (
-                                <button
-                                  onClick={() => setDeletingRequest(req)}
-                                  className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-605 hover:text-white dark:text-amber-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                  title="Solicitar eliminación al administrador"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {req.status === 'rejected' && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="flex items-center gap-1 px-3 py-1 bg-rose-50 text-rose-650 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-450 dark:border-rose-900/30 rounded-full text-[10px] font-bold">
-                          <X className="w-3 h-3" />
-                          Rechazada
-                        </span>
-                        {user?.role !== 'employee' && (
-                          <>
-                            <button
-                              onClick={() => openEditModal(req)}
-                              className="p-1.5 bg-slate-500/10 hover:bg-slate-500 text-slate-655 hover:text-white dark:text-slate-350 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Editar Solicitud"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {user?.role === 'admin' ? (
-                              <button
-                                onClick={() => setDeletingRequest(req)}
-                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-605 hover:text-white dark:text-rose-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                title="Eliminar permanentemente"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            ) : (
-                              !req.deletionRequested && (
-                                <button
-                                  onClick={() => setDeletingRequest(req)}
-                                  className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-605 hover:text-white dark:text-amber-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                  title="Solicitar eliminación al administrador"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {req.status === 'pending' && (
-                      <>
-                        {user?.role === 'employee' ? (
-                          <span className="flex items-center gap-1 px-3 py-1 bg-amber-50 text-amber-655 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 rounded-full text-[10px] font-bold animate-pulse">
-                            <Clock className="w-3 h-3" />
-                            Esperando Aprobación
+                    <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-850/40 shrink-0">
+                      {/* Status Badge */}
+                      {req.status === 'approved' && (
+                        <div className="flex items-center gap-2">
+                          <span className="flex items-center gap-1 px-3 py-1 bg-emerald-500/10 text-emerald-650 border border-emerald-500/20 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded-xl text-[10px] font-bold">
+                            <Check className="w-3 h-3" />
+                            Aprobada
                           </span>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => openEditModal(req)}
-                              className="p-1.5 bg-slate-500/10 hover:bg-slate-500 text-slate-655 hover:text-white dark:text-slate-350 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Editar Solicitud"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleResolveRequest(req.id, 'approved')}
-                              className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Aprobar"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleResolveRequest(req.id, 'rejected')}
-                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Rechazar"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                            {user?.role === 'admin' ? (
+                          {user?.role !== 'employee' && (
+                            <div className="flex items-center gap-1.5 ml-1">
                               <button
-                                onClick={() => setDeletingRequest(req)}
-                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-605 hover:text-white dark:text-rose-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                title="Eliminar permanentemente"
+                                onClick={() => openEditModal(req)}
+                                className="p-1.5 bg-slate-100 hover:bg-brand-500 dark:bg-slate-800/80 dark:hover:bg-brand-600 text-slate-500 hover:text-white dark:text-slate-450 dark:hover:text-white rounded-lg transition-all cursor-pointer hover:scale-105"
+                                title="Editar Solicitud"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                            ) : (
-                              !req.deletionRequested && (
+                              {user?.role === 'admin' ? (
                                 <button
                                   onClick={() => setDeletingRequest(req)}
-                                  className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-605 hover:text-white dark:text-amber-400 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
-                                  title="Solicitar eliminación al administrador"
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white dark:bg-rose-500/20 dark:hover:bg-rose-600 dark:text-rose-455 dark:hover:text-white border border-rose-500/20 dark:border-rose-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                  title="Eliminar permanentemente"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                              )
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
+                              ) : (
+                                !req.deletionRequested && (
+                                  <button
+                                    onClick={() => setDeletingRequest(req)}
+                                    className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-600 hover:text-white dark:bg-amber-500/20 dark:hover:bg-amber-600 dark:text-amber-455 dark:border-amber-500/20 dark:border-amber-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                    title="Solicitar eliminación al administrador"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {req.status === 'rejected' && (
+                        <div className="flex items-center gap-2">
+                          <span className="flex items-center gap-1 px-3 py-1 bg-rose-500/10 text-rose-650 border border-rose-500/20 dark:bg-rose-950/20 dark:text-rose-450 dark:border-rose-900/30 rounded-xl text-[10px] font-bold">
+                            <X className="w-3 h-3" />
+                            Rechazada
+                          </span>
+                          {user?.role !== 'employee' && (
+                            <div className="flex items-center gap-1.5 ml-1">
+                              <button
+                                onClick={() => openEditModal(req)}
+                                className="p-1.5 bg-slate-100 hover:bg-brand-500 dark:bg-slate-800/80 dark:hover:bg-brand-600 text-slate-500 hover:text-white dark:text-slate-455 dark:hover:text-white rounded-lg transition-all cursor-pointer hover:scale-105"
+                                title="Editar Solicitud"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              {user?.role === 'admin' ? (
+                                <button
+                                  onClick={() => setDeletingRequest(req)}
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white dark:bg-rose-500/20 dark:hover:bg-rose-600 dark:text-rose-455 dark:hover:text-white border border-rose-500/20 dark:border-rose-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                  title="Eliminar permanentemente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                !req.deletionRequested && (
+                                  <button
+                                    onClick={() => setDeletingRequest(req)}
+                                    className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-600 hover:text-white dark:bg-amber-500/20 dark:hover:bg-amber-600 dark:text-amber-455 dark:border-amber-500/20 dark:border-amber-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                    title="Solicitar eliminación al administrador"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {req.status === 'pending' && (
+                        <>
+                          {user?.role === 'employee' ? (
+                            <span className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 text-amber-655 border border-amber-500/20 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 rounded-xl text-[10px] font-bold animate-pulse">
+                              <Clock className="w-3 h-3" />
+                              Esperando Aprobación
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => openEditModal(req)}
+                                className="p-1.5 bg-slate-100 hover:bg-brand-500 dark:bg-slate-800/80 dark:hover:bg-brand-600 text-slate-500 hover:text-white dark:text-slate-450 dark:hover:text-white rounded-lg transition-all cursor-pointer hover:scale-105"
+                                title="Editar Solicitud"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleResolveRequest(req.id, 'approved')}
+                                className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white dark:bg-emerald-500/20 dark:hover:bg-emerald-600 dark:text-emerald-450 dark:hover:text-white border border-emerald-500/20 dark:border-emerald-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                title="Aprobar"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleResolveRequest(req.id, 'rejected')}
+                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white dark:bg-rose-500/20 dark:hover:bg-rose-600 dark:text-rose-455 dark:hover:text-white border border-rose-500/20 dark:border-rose-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                title="Rechazar"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                              {user?.role === 'admin' ? (
+                                <button
+                                  onClick={() => setDeletingRequest(req)}
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-605 hover:text-white dark:bg-rose-500/20 dark:hover:bg-rose-600 dark:text-rose-450 dark:hover:text-white border border-rose-500/20 dark:border-rose-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                  title="Eliminar permanentemente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                !req.deletionRequested && (
+                                  <button
+                                    onClick={() => setDeletingRequest(req)}
+                                    className="p-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-605 hover:text-white dark:bg-amber-500/20 dark:hover:bg-amber-600 dark:text-amber-400 dark:hover:text-white border border-amber-500/20 dark:border-amber-500/30 rounded-lg transition-all cursor-pointer hover:scale-105"
+                                    title="Solicitar eliminación al administrador"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })
             )}
           </div>
         </div>
@@ -1626,6 +1633,74 @@ const VacationControl: React.FC = () => {
                 {user?.role === 'admin' ? 'Eliminar Definitivamente' : 'Enviar Solicitud'}
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regulations Modal */}
+      {showRegulationsModal && user?.role !== 'employee' && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowRegulationsModal(false)} />
+          <div className="flex min-h-full items-center justify-center p-4 md:p-8 relative z-10 pointer-events-none">
+            <div className="bento-card max-w-md w-full p-6 space-y-5 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200 pointer-events-auto shadow-2xl transition-all">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-850/40">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Info className="w-4.5 h-4.5 text-brand-500" />
+                  Normativa Feriado Legal Chile
+                </h3>
+                <button 
+                  onClick={() => setShowRegulationsModal(false)}
+                  className="text-slate-400 hover:text-slate-655 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs text-slate-600 dark:text-slate-350 leading-relaxed font-medium">
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-1">
+                  <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+                    1. Feriado Básico
+                  </h4>
+                  <p className="pl-3">
+                    Todo trabajador con más de un año de servicio tiene derecho a 15 días hábiles de vacaciones remuneradas.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-1">
+                  <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+                    2. Días Hábiles
+                  </h4>
+                  <p className="pl-3">
+                    Los días de vacaciones se cuentan de lunes a viernes. Los sábados, domingos y feriados no computan.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-1">
+                  <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+                    3. Continuidad
+                  </h4>
+                  <p className="pl-3">
+                    El trabajador debe solicitar al menos 10 días seguidos. El resto puede fraccionarse de común acuerdo.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-850/40 flex items-center justify-between gap-4">
+                <span className="text-[9px] font-bold text-emerald-655 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                  Código del Trabajo
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowRegulationsModal(false)}
+                  className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-[10px] font-bold transition-all cursor-pointer shadow-md"
+                >
+                  Entendido
+                </button>
+              </div>
             </div>
           </div>
         </div>
