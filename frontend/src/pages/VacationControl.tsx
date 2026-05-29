@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { authAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { 
   Calendar, Check, X, Search, Sparkles, Clock, 
   CheckCircle, AlertCircle, PlusCircle, User, Info, ShieldCheck, Edit2,
-  Trash2, AlertTriangle
+  Trash2, AlertTriangle, Printer, Upload, FileSignature
 } from 'lucide-react';
 
 interface VacationRequest {
@@ -129,6 +130,8 @@ const VacationControl: React.FC = () => {
   const [tempDaysSelectedDays, setTempDaysSelectedDays] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
   const [showRegulationsModal, setShowRegulationsModal] = useState(false);
+  const [uploadingVoucherId, setUploadingVoucherId] = useState<string | null>(null);
+  const [uploadingPercent, setUploadingPercent] = useState(0);
 
   useEffect(() => {
     if (toast) {
@@ -157,6 +160,9 @@ const VacationControl: React.FC = () => {
 
   // Deleting confirmation state (For HR / Admin)
   const [deletingRequest, setDeletingRequest] = useState<VacationRequest | null>(null);
+
+  // Resetting signature confirmation state (For HR / Admin)
+  const [resettingRequest, setResettingRequest] = useState<{ req: VacationRequest; annexId: string } | null>(null);
 
   // Calendar month navigation handlers
   const handlePrevMonth = () => {
@@ -729,6 +735,12 @@ const VacationControl: React.FC = () => {
       }
     }
 
+    const overlap = checkOverlap(user?.id || 'unknown', startDate, endDate);
+    if (overlap) {
+      showToast(`Las fechas solicitadas se solapan con otra solicitud (el día ${formatDateString(overlap.overlappedDay)} ya está reservado en una solicitud ${overlap.request.status === 'approved' ? 'aprobada' : 'pendiente'}).`, "error");
+      return;
+    }
+
     const cleanComments = comments.trim();
 
     const newRequest: VacationRequest = {
@@ -766,7 +778,11 @@ const VacationControl: React.FC = () => {
   const handleResolveRequest = (id: string, status: 'approved' | 'rejected') => {
     const updated = requests.map((req) => {
       if (req.id === id) {
-        return { ...req, status };
+        const updatedReq = { ...req, status };
+        if (status === 'approved') {
+          generateVacationAnnex(updatedReq);
+        }
+        return updatedReq;
       }
       return req;
     });
@@ -827,6 +843,12 @@ const VacationControl: React.FC = () => {
       return;
     }
 
+    const overlap = checkOverlap(editingRequest.workerId, editStartDate, editEndDate, editingRequest.id);
+    if (overlap) {
+      showToast(`Las fechas se solapan con otra solicitud del colaborador (el día ${formatDateString(overlap.overlappedDay)} ya está reservado en una solicitud ${overlap.request.status === 'approved' ? 'aprobada' : 'pendiente'}).`, "error");
+      return;
+    }
+
     if (editType === 'complete') {
       if (calculated !== workerBal.available) {
         showToast(`Para vacaciones completas debes solicitar todos los días disponibles (${workerBal.available} días).`, "warning");
@@ -846,7 +868,7 @@ const VacationControl: React.FC = () => {
 
     const updated = requests.map((req) => {
       if (req.id === editingRequest.id) {
-        return {
+        const updatedReq = {
           ...req,
           startDate: editStartDate,
           endDate: editEndDate,
@@ -856,6 +878,10 @@ const VacationControl: React.FC = () => {
           type: editType,
           selectedDates: updatedSelectedDates
         };
+        if (editStatus === 'approved') {
+          generateVacationAnnex(updatedReq);
+        }
+        return updatedReq;
       }
       return req;
     });
@@ -889,6 +915,309 @@ const VacationControl: React.FC = () => {
     
     setDeletingRequest(null);
     fetchVacationRequests();
+  };
+
+  const checkOverlap = (workerId: string, startStr: string, endStr: string, excludeRequestId?: string) => {
+    if (!startStr || !endStr) return null;
+    const newRangeDays = getBusinessDaysArray(startStr, endStr);
+    
+    // Find all other active requests
+    const activeRequests = requests.filter(
+      r => r.workerId === workerId && r.status !== 'rejected' && r.id !== excludeRequestId
+    );
+    
+    for (const req of activeRequests) {
+      const existingDays = req.type === 'days' 
+        ? (req.selectedDates || getCleanCommentAndDates(req).dates)
+        : getBusinessDaysArray(req.startDate, req.endDate);
+        
+      for (const day of newRangeDays) {
+        if (existingDays.includes(day)) {
+          return { overlappedDay: day, request: req };
+        }
+      }
+    }
+    return null;
+  };
+
+  const generateVacationAnnex = (req: VacationRequest) => {
+    try {
+      const currentSimDocs = localStorage.getItem('nubcore_sim_documents');
+      let docs: any[] = [];
+      if (currentSimDocs) {
+        docs = JSON.parse(currentSimDocs);
+      }
+      
+      // Check if there is already an annex for this request
+      const exists = docs.some(d => d.metadata?.vacation_request_id === req.id);
+      if (exists) return;
+
+      const newDocId = `doc_vac_${Math.random().toString(36).substr(2, 9)}`;
+      const dateStr = new Date().toLocaleDateString('es-CL');
+      
+      const newDoc = {
+        id: newDocId,
+        title: `Comprobante de Vacaciones - ${req.workerName}`,
+        file_url: `#`,
+        file_size: 148200,
+        file_type: 'application/pdf',
+        category: 'anexo',
+        ocr_status: 'completed',
+        metadata: {
+          vacation_request_id: req.id,
+          rut_empresa: user?.tenant?.tax_id || '76.123.456-K',
+          rut_empleado: req.workerRut,
+          nombre_empleado: req.workerName,
+          tipo_anexo: 'Anexo de Vacaciones',
+          fecha_documento: dateStr,
+          is_auto_generated: true,
+          is_physically_signed: false
+        },
+        version: 1,
+        created_at: new Date().toISOString()
+      };
+
+      docs.push(newDoc);
+      localStorage.setItem('nubcore_sim_documents', JSON.stringify(docs));
+
+      // Set signature status as pending
+      const savedSignatures = localStorage.getItem('nubcore_annex_signature_statuses');
+      const signatures = savedSignatures ? JSON.parse(savedSignatures) : {};
+      signatures[newDocId] = 'pending';
+      localStorage.setItem('nubcore_annex_signature_statuses', JSON.stringify(signatures));
+    } catch (e) {
+      console.error("Error generating auto annex", e);
+    }
+  };
+
+  const getRequestAnnex = (requestId: string) => {
+    try {
+      const currentSimDocs = localStorage.getItem('nubcore_sim_documents');
+      if (!currentSimDocs) return null;
+      const docs = JSON.parse(currentSimDocs);
+      const doc = docs.find((d: any) => d.metadata?.vacation_request_id === requestId);
+      if (!doc) return null;
+
+      const savedSignatures = localStorage.getItem('nubcore_annex_signature_statuses');
+      const signatures = savedSignatures ? JSON.parse(savedSignatures) : {};
+      return {
+        ...doc,
+        signatureStatus: signatures[doc.id] || 'pending'
+      };
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const handlePrintVoucher = (req: VacationRequest) => {
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const margin = 20;
+      let y = 25;
+
+      // Header Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("COMPROBANTE DE FERIADO LEGAL", 105, y, { align: "center" });
+
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text("(Artículo 67 y siguientes del Código del Trabajo - Chile)", 105, y, { align: "center" });
+
+      y += 15;
+
+      // Empresa Box
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.rect(margin, y, 170, 26, "FD");
+
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("DATOS DE LA EMPRESA:", margin + 5, y + 7);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(`Razón Social: ${user?.tenant?.name || 'Constructora Alfa S.A.'}`, margin + 5, y + 14);
+      doc.text(`RUT Empresa: ${user?.tenant?.tax_id || '76.123.456-K'}`, margin + 5, y + 21);
+      doc.text(`Fecha Emisión: ${new Date().toLocaleDateString('es-CL')}`, margin + 115, y + 7);
+
+      y += 34;
+
+      // Trabajador Box
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, 170, 22, "FD");
+
+      doc.setFont("helvetica", "bold");
+      doc.text("DATOS DEL TRABAJADOR:", margin + 5, y + 7);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(`Nombre Completo: ${req.workerName}`, margin + 5, y + 14);
+      doc.text(`RUT Trabajador: ${req.workerRut}`, margin + 5, y + 20);
+
+      y += 30;
+
+      // Detalle de Vacaciones Box
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, 170, 48, "FD");
+
+      doc.setFont("helvetica", "bold");
+      doc.text("DETALLE DEL PERÍODO DE VACACIONES:", margin + 5, y + 7);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(`Fecha de Inicio: ${formatDateString(req.startDate)}`, margin + 5, y + 15);
+      doc.text(`Fecha de Fin: ${formatDateString(req.endDate)}`, margin + 5, y + 22);
+      doc.text(`Total de Días Hábiles Solicitados: ${req.days} días`, margin + 5, y + 29);
+
+      const datesText = req.type === 'days' 
+        ? `Días específicos señalados:\n${(req.selectedDates || []).map(d => formatDateString(d)).join(', ')}`
+        : `Tipo de Solicitud: Vacaciones Completas (Rango continuo de días).`;
+      
+      const splitDates = doc.splitTextToSize(datesText, 160);
+      doc.text(splitDates, margin + 5, y + 36);
+
+      y += 62;
+
+      // Legal disclaimer
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      const disclaimer = "El trabajador abajo firmante declara gozar de su feriado legal en los términos aquí descritos de común acuerdo con el empleador, de conformidad con lo establecido en la legislación laboral chilena vigente.";
+      const splitDisclaimer = doc.splitTextToSize(disclaimer, 170);
+      doc.text(splitDisclaimer, margin, y);
+
+      y += 30;
+
+      // Signatures lines
+      doc.setDrawColor(148, 163, 184); // slate-400
+      doc.line(margin + 10, y, margin + 70, y);
+      doc.line(margin + 100, y, margin + 160, y);
+
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text("Firma Trabajador", margin + 40, y + 5, { align: "center" });
+      doc.text("Firma Empleador (RRHH)", margin + 130, y + 5, { align: "center" });
+
+      doc.save(`Comprobante_Vacaciones_${req.workerName.replace(/\s+/g, '_')}.pdf`);
+      showToast("Comprobante generado y descargado en formato PDF.", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Error al generar el PDF del comprobante.", "error");
+    }
+  };
+
+  const handleUploadPhysicalSignature = (req: VacationRequest, file: File) => {
+    const annex = getRequestAnnex(req.id);
+    if (!annex) {
+      generateVacationAnnex(req);
+    }
+    
+    setUploadingVoucherId(req.id);
+    setUploadingPercent(0);
+
+    const interval = setInterval(() => {
+      setUploadingPercent((prev) => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          return 100;
+        }
+        return prev + 25;
+      });
+    }, 150);
+
+    setTimeout(() => {
+      clearInterval(interval);
+      try {
+        const currentSimDocs = localStorage.getItem('nubcore_sim_documents');
+        if (currentSimDocs) {
+          const docs = JSON.parse(currentSimDocs);
+          const updatedDocs = docs.map((d: any) => {
+            if (d.metadata?.vacation_request_id === req.id) {
+              return {
+                ...d,
+                title: `Comprobante de Vacaciones [Firmado Físicamente] - ${req.workerName}`,
+                file_url: URL.createObjectURL(file),
+                file_name: file.name,
+                file_size: file.size,
+                file_type: file.type,
+                metadata: {
+                  ...d.metadata,
+                  is_physically_signed: true,
+                  uploaded_file_name: file.name
+                }
+              };
+            }
+            return d;
+          });
+          localStorage.setItem('nubcore_sim_documents', JSON.stringify(updatedDocs));
+        }
+
+        const savedSignatures = localStorage.getItem('nubcore_annex_signature_statuses');
+        const signatures = savedSignatures ? JSON.parse(savedSignatures) : {};
+        const docs = currentSimDocs ? JSON.parse(currentSimDocs) : [];
+        const doc = docs.find((d: any) => d.metadata?.vacation_request_id === req.id);
+        if (doc) {
+          signatures[doc.id] = 'signed';
+          localStorage.setItem('nubcore_annex_signature_statuses', JSON.stringify(signatures));
+        }
+
+        showToast(`Comprobante "${file.name}" cargado y registrado con éxito`, "success");
+        fetchVacationRequests();
+      } catch (err) {
+        console.error(err);
+      }
+      setUploadingVoucherId(null);
+    }, 800);
+  };
+
+  const handleResetAnnexSignature = (req: VacationRequest, annexId: string) => {
+    setResettingRequest({ req, annexId });
+  };
+
+  const confirmResetAnnexSignature = () => {
+    if (!resettingRequest) return;
+    const { req, annexId } = resettingRequest;
+
+    try {
+      // 1. Update the document title and metadata in nubcore_sim_documents
+      const currentSimDocs = localStorage.getItem('nubcore_sim_documents');
+      if (currentSimDocs) {
+        const docs = JSON.parse(currentSimDocs);
+        const updatedDocs = docs.map((d: any) => {
+          if (d.id === annexId) {
+            return {
+              ...d,
+              title: `Comprobante de Vacaciones - ${req.workerName}`,
+              metadata: {
+                ...d.metadata,
+                is_physically_signed: false
+              }
+            };
+          }
+          return d;
+        });
+        localStorage.setItem('nubcore_sim_documents', JSON.stringify(updatedDocs));
+      }
+
+      // 2. Set signature status back to pending in nubcore_annex_signature_statuses
+      const savedSignatures = localStorage.getItem('nubcore_annex_signature_statuses');
+      const signatures = savedSignatures ? JSON.parse(savedSignatures) : {};
+      signatures[annexId] = 'pending';
+      localStorage.setItem('nubcore_annex_signature_statuses', JSON.stringify(signatures));
+
+      showToast("Firma de comprobante anulada. Estado devuelto a Firma Pendiente.", "success");
+      setResettingRequest(null);
+      fetchVacationRequests(); // trigger re-render
+    } catch (e) {
+      console.error(e);
+      setResettingRequest(null);
+    }
   };
 
   const getFilteredRequests = () => {
@@ -966,6 +1295,13 @@ const VacationControl: React.FC = () => {
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
               {user?.role === 'employee' ? 'Feriado legal anual acumulado actual' : 'Total acumulado en solicitudes en cola'}
             </p>
+            {user?.role === 'employee' && (
+              <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800/40 text-[9px] text-slate-450 dark:text-slate-500 flex justify-between font-mono font-bold">
+                <span className="text-brand-600 dark:text-brand-400">Cuota: +15</span>
+                <span className="text-emerald-600 dark:text-emerald-400">Tomados: -{balance.taken - 10}</span>
+                <span className="text-amber-500 dark:text-amber-400">Trámite: -{balance.pending}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1183,6 +1519,16 @@ const VacationControl: React.FC = () => {
               getFilteredRequests().map((req) => {
                 const { cleanComment, dates: reqDates } = getCleanCommentAndDates(req);
                 const isComplete = req.type === 'complete' || req.comments.startsWith('[Vacaciones Completas]');
+                
+                // Retrieve associated annex if approved
+                let annex = null;
+                if (req.status === 'approved') {
+                  annex = getRequestAnnex(req.id);
+                  if (!annex) {
+                    generateVacationAnnex(req);
+                    annex = getRequestAnnex(req.id);
+                  }
+                }
 
                 return (
                   <div 
@@ -1239,7 +1585,7 @@ const VacationControl: React.FC = () => {
                                   </span>
                                 ))}
                               </div>
-                            </details>
+</details>
                           </div>
                         )}
 
@@ -1249,14 +1595,102 @@ const VacationControl: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-850/40 shrink-0">
+                    <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-850/40 shrink-0 select-none">
                       {/* Status Badge */}
                       {req.status === 'approved' && (
-                        <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1 px-3 py-1 bg-emerald-500/10 text-emerald-650 border border-emerald-500/20 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded-xl text-[10px] font-bold">
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                          <span className="flex items-center gap-1 px-3 py-1 bg-emerald-500/10 text-emerald-650 border border-emerald-500/20 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded-xl text-[10px] font-bold shrink-0">
                             <Check className="w-3 h-3" />
                             Aprobada
                           </span>
+                          
+                          {annex && (
+                            <>
+                              {annex.signatureStatus === 'signed' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl text-[9px] text-slate-500 dark:text-slate-400 font-bold shrink-0">
+                                  <FileSignature className="w-3.5 h-3.5 text-slate-450" />
+                                  <span title={annex.metadata?.is_physically_signed ? `Firmado físicamente: ${annex.metadata?.uploaded_file_name || 'comprobante.pdf'}` : "Firmado digitalmente con PIN"}>
+                                    {annex.file_url && annex.file_url !== '#' ? (
+                                      <a
+                                        href={annex.file_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="hover:underline text-brand-600 dark:text-brand-400 flex items-center gap-0.5 cursor-pointer"
+                                      >
+                                        Doc: Firmado {annex.metadata?.is_physically_signed ? 'Físico' : 'Digital'}
+                                      </a>
+                                    ) : (
+                                      <span>
+                                        Doc: Firmado {annex.metadata?.is_physically_signed ? 'Físico' : 'Digital'}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {user?.role !== 'employee' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetAnnexSignature(req, annex.id)}
+                                      className="hover:text-rose-500 dark:hover:text-rose-455 transition-all duration-200 cursor-pointer ml-1.5 pl-1.5 border-l border-slate-200 dark:border-slate-750 flex items-center justify-center hover:scale-110 active:scale-90"
+                                      title="Anular firma y volver a Firma Pendiente"
+                                    >
+                                      <X className="w-3 h-3" strokeWidth={2.5} />
+                                    </button>
+                                  )}
+                                </span>
+                              ) : user?.role === 'employee' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 dark:border-amber-400/25 rounded-xl text-[9px] font-bold animate-pulse shrink-0">
+                                  <Clock className="w-3 h-3" />
+                                  Firma Pendiente (Mis Anexos)
+                                </span>
+                              ) : (
+                                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950/30 p-1 rounded-xl border border-slate-150 dark:border-slate-850/80 shrink-0">
+                                  <span className="text-[9px] text-amber-500 dark:text-amber-400 font-bold px-1 flex items-center gap-1">
+                                    <Clock className="w-3 h-3 animate-pulse" />
+                                    Firma Pendiente
+                                  </span>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePrintVoucher(req)}
+                                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-brand-500 dark:text-slate-450 dark:hover:text-brand-400 rounded-lg transition-colors cursor-pointer"
+                                    title="Imprimir comprobante para firma física"
+                                  >
+                                    <Printer className="w-3.5 h-3.5" />
+                                  </button>
+                                  
+                                  {uploadingVoucherId === req.id ? (
+                                    <span className="text-[8px] text-slate-400 animate-pulse font-mono pl-1">
+                                      {uploadingPercent}%
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <input
+                                        type="file"
+                                        id={`file-upload-${req.id}`}
+                                        className="hidden"
+                                        accept="application/pdf,image/*"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            handleUploadPhysicalSignature(req, file);
+                                          }
+                                          e.target.value = '';
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => document.getElementById(`file-upload-${req.id}`)?.click()}
+                                        className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-emerald-500 dark:text-slate-450 dark:hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
+                                        title="Cargar comprobante escaneado (Firma Física)"
+                                      >
+                                        <Upload className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                          
                           {user?.role !== 'employee' && (
                             <div className="flex items-center gap-1.5 ml-1">
                               <button
@@ -1633,6 +2067,57 @@ const VacationControl: React.FC = () => {
                 {user?.role === 'admin' ? 'Eliminar Definitivamente' : 'Enviar Solicitud'}
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Signature Confirmation Modal */}
+      {resettingRequest && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setResettingRequest(null)} />
+          <div className="flex min-h-full items-center justify-center p-4 md:p-8 relative z-10 pointer-events-none">
+            <div className="bento-card max-w-sm w-full p-6 space-y-4 dark:bg-[#0c111f]/95 relative text-xs font-semibold text-slate-800 dark:text-slate-200 pointer-events-auto">
+              <div className="flex items-center gap-3 pb-2 border-b border-slate-100 dark:border-slate-850/40">
+                <div className="p-2 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  <ShieldCheck className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Anular Firma Comprobante
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Control de Auditoría y Documentación</p>
+                </div>
+                <button 
+                  onClick={() => setResettingRequest(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-250 cursor-pointer ml-auto"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="text-slate-655 dark:text-slate-350 font-medium leading-relaxed">
+                ¿Seguro que deseas <b>anular la firma</b> del comprobante de vacaciones de <b>{resettingRequest.req.workerName}</b>?
+                <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-150 dark:border-slate-800/80">
+                  El documento pasará a estado <b>"Firma Pendiente"</b>, lo que permitirá generar un nuevo comprobante o subir un escaneo corregido.
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResettingRequest(null)}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-355 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmResetAnnexSignature}
+                  className="flex-1 py-2 text-white bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-600/10 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Confirmar Anulación
+                </button>
+              </div>
             </div>
           </div>
         </div>
